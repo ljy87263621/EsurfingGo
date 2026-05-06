@@ -56,27 +56,31 @@ func NewClient(opts Options, states *States, session *Session) *Client {
 // Run starts the main client loop.
 func (c *Client) Run() {
 	for c.states.IsRunning() {
+		if c.session.IsInitialized() && c.states.IsLogged() {
+			nowMs := time.Now().UnixMilli()
+			retryMs, err := strconv.ParseInt(c.keepRetry, 10, 64)
+			if err == nil && retryMs > 0 && nowMs-c.tick >= retryMs*1000 {
+				log.Println("[Client] Sending heartbeat...")
+				if err := c.heartbeat(c.states.GetTicket()); err != nil {
+					log.Printf("[Client] Heartbeat error: %v", err)
+					c.states.SetLogged(false)
+					c.statusChanged = true
+					continue
+				}
+				log.Printf("[Client] Heartbeat OK, next retry: %ss", c.keepRetry)
+				c.tick = time.Now().UnixMilli()
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
 		status := network.DetectConfigWithClient(c.httpClient, c.states, c.statusChanged)
 		c.statusChanged = status.Status != c.lastStatus
 		c.lastStatus = status.Status
 
 		switch status.Status {
 		case network.StatusSuccess:
-			if c.session.IsInitialized() && c.states.IsLogged() {
-				nowMs := time.Now().UnixMilli()
-				retryMs, err := strconv.ParseInt(c.keepRetry, 10, 64)
-				if err == nil && nowMs-c.tick >= retryMs*1000 {
-					log.Println("[Client] Sending heartbeat...")
-					if err := c.heartbeat(c.states.GetTicket()); err != nil {
-						log.Printf("[Client] Heartbeat error: %v", err)
-						c.states.SetLogged(false)
-						c.statusChanged = true
-						continue
-					}
-					log.Printf("[Client] Heartbeat OK, next retry: %ss", c.keepRetry)
-					c.tick = time.Now().UnixMilli()
-				}
-			} else if c.statusChanged {
+			if !(c.session.IsInitialized() && c.states.IsLogged()) && c.statusChanged {
 				log.Println("[Client] Network is connected.")
 			}
 			time.Sleep(1 * time.Second)

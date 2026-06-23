@@ -149,9 +149,15 @@ func isRedirect(code int) bool {
 }
 
 // NewHTTPClient creates a configured HTTP client with redirect handling.
-func NewHTTPClient(state StateProvider) *http.Client {
+// An optional baseTransport can be provided to override the default transport
+// (e.g., a transport bound to a specific network interface).
+func NewHTTPClient(state StateProvider, baseTransport ...http.RoundTripper) *http.Client {
+	inner := http.RoundTripper(http.DefaultTransport)
+	if len(baseTransport) > 0 && baseTransport[0] != nil {
+		inner = baseTransport[0]
+	}
 	transport := &redirectInterceptor{
-		inner:    http.DefaultTransport,
+		inner:    inner,
 		state:    state,
 		maxRedir: 5,
 	}

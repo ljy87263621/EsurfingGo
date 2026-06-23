@@ -8,14 +8,14 @@
 - 自动心跳保活，断线自动重连
 - 跨平台编译（Windows / Linux / macOS）
 - Go编译后为单文件且无须依赖，便于路由器部署
-- **本项目同时有安卓手机端版本[EsurfingGo-Android](https://github.com/xxmod/EsurfingGo-Android)**
+- 支持多拨
 
 ## 使用
 
 [Release](https://github.com/xxmod/EsurfingGo/releases/latest)中有最新版本下载，可以直接下载使用
 
 ```bash
-esurfing -u <用户名> -p <密码> [-s <短信验证码>]
+esurfing -u <用户名> -p <密码> [-s <短信验证码>] [-n <网络接口号>]
 ```
 
 ### 参数
@@ -24,7 +24,9 @@ esurfing -u <用户名> -p <密码> [-s <短信验证码>]
 | ---------------------- | ---------------------- |
 | `-u` / `-user`     | 登录用户名             |
 | `-p` / `-password` | 登录密码               |
-| `-s` / `-sms`      | 预填短信验证码（可选） |
+| `-c` / `-sms`      | 预填短信验证码（可选） |
+| `-s` / `--show`    | 查看网络接口          |
+| `-n` / `--network` | 使用指定网络接口认证   |
 
 ### 示例
 
@@ -34,11 +36,20 @@ esurfing -u 13800138000 -p mypassword
 
 # 携带短信验证码
 esurfing -u 13800138000 -p mypassword -s 123456
+
+#指定特定网络接口，如wifi进行拨号
+esurfing  -s
+#返回
+1：以太网
+2：WLAN
+
+esurfing -n 2 -u 13800138000 -p mypassword
+
 ```
 
 程序启动后会自动检测网络状态，完成认证并保持连接。按 `Ctrl+C` 安全退出。
 
-## 🚀 部署方法
+## 部署方法
 
 ### 1. 直接运行
 
@@ -125,7 +136,7 @@ while true;do
 done
 ```
 
-## 🛠️ 构建方法
+## 构建方法
 
 ### 1. 基础构建（推荐）
 
@@ -161,7 +172,7 @@ go build -o esurfing .
 GOARM=5 CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -o esurfing-arm5 .
 ```
 
-## 🧪 测试验证
+## 测试验证
 
 构建后建议运行完整测试套件：
 
@@ -179,6 +190,7 @@ go test ./... -v
 ├── session.go           # 会话与加密管理
 ├── states.go            # 全局状态（线程安全）
 ├── constants.go         # 常量定义
+├── iface.go             # 网络接口列表与绑定
 ├── cipher/              # 加密算法实现
 │   ├── cipher.go        #   工厂函数
 │   ├── keydata.go       #   密钥数据

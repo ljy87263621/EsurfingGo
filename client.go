@@ -41,8 +41,8 @@ type Options struct {
 	SMSCode       string
 }
 
-func NewClient(opts Options, states *States, session *Session) *Client {
-	httpClient := network.NewHTTPClient(states)
+func NewClient(opts Options, states *States, session *Session, baseTransport ...http.RoundTripper) *Client {
+	httpClient := network.NewHTTPClient(states, baseTransport...)
 	return &Client{
 		options:       opts,
 		states:        states,

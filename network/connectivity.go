@@ -73,21 +73,22 @@ func DetectConfigWithClient(httpClient *http.Client, state StateProvider, verbos
 	const maxAttempts = 6 // 1 initial + up to 5 JS redirects
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			log.Printf("[DetectConfig] Following JS redirect #%d: %s", attempt, currentURL)
+			log.Printf("[DetectConfig] Following JS redirect #%d: %s", attempt, safeURLForLog(currentURL))
 		}
 
 		httpReq, err := http.NewRequest("GET", currentURL, nil)
 		if err != nil {
-			log.Printf("[DetectConfig] Failed to create request for %s: %v", currentURL, err)
+			log.Printf("[DetectConfig] Failed to create request for %s: %v", safeURLForLog(currentURL), err)
 			return ConfigResult{Status: StatusRequestError}
 		}
 		httpReq.Header.Set("User-Agent", userAgent)
 		httpReq.Header.Set("Accept", requestAccept)
 		httpReq.Header.Set("Client-ID", state.GetClientID())
+		httpReq = httpReq.WithContext(withPortalDetection(httpReq.Context()))
 
 		httpResp, err := client.Do(httpReq)
 		if err != nil {
-			log.Printf("[DetectConfig] HTTP request failed for %s: %v", currentURL, err)
+			log.Printf("[DetectConfig] HTTP request failed for %s: %v", safeURLForLog(currentURL), err)
 			return ConfigResult{Status: StatusRequestError}
 		}
 		body, err := io.ReadAll(httpResp.Body)
@@ -101,18 +102,15 @@ func DetectConfigWithClient(httpClient *http.Client, state StateProvider, verbos
 		content = string(body)
 
 		if verbose {
-			log.Printf("[DetectConfig] [Attempt %d] URL: %s", attempt+1, currentURL)
+			log.Printf("[DetectConfig] [Attempt %d] URL: %s", attempt+1, safeURLForLog(currentURL))
 			log.Printf("[DetectConfig] [Attempt %d] Status: %d %s", attempt+1, resp.StatusCode, resp.Status)
-			log.Printf("[DetectConfig] [Attempt %d] Final URL: %s", attempt+1, resp.Request.URL.String())
+			if resp.Request != nil && resp.Request.URL != nil {
+				log.Printf("[DetectConfig] [Attempt %d] Final URL: %s", attempt+1, safeURLForLog(resp.Request.URL.String()))
+			}
 			for k, v := range resp.Header {
 				log.Printf("[DetectConfig] [Attempt %d] Header: %s = %s", attempt+1, k, strings.Join(v, ", "))
 			}
 			log.Printf("[DetectConfig] [Attempt %d] Body length: %d bytes", attempt+1, len(body))
-			if len(content) <= 2000 {
-				log.Printf("[DetectConfig] [Attempt %d] Body: %s", attempt+1, content)
-			} else {
-				log.Printf("[DetectConfig] [Attempt %d] Body (first 2000 chars): %s", attempt+1, content[:2000])
-			}
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
@@ -136,9 +134,6 @@ func DetectConfigWithClient(httpClient *http.Client, state StateProvider, verbos
 		if portalConfig != "" {
 			if verbose {
 				log.Printf("[DetectConfig] Portal config found (%d chars)", len(portalConfig))
-				if len(portalConfig) <= 1000 {
-					log.Printf("[DetectConfig] Portal config: %s", portalConfig)
-				}
 			}
 			break
 		}
@@ -159,12 +154,8 @@ func DetectConfigWithClient(httpClient *http.Client, state StateProvider, verbos
 		if len(content) > 0 {
 			log.Printf("[DetectConfig] Captive portal detected (HTTP %d with HTML body) but ESurfing portal config not found", resp.StatusCode)
 			log.Printf("[DetectConfig] Expected config between tags: %q ... %q", portalStartTag, portalEndTag)
-			log.Printf("[DetectConfig] Last URL: %s", currentURL)
-			snippet := content
-			if len(snippet) > 500 {
-				snippet = snippet[:500]
-			}
-			log.Printf("[DetectConfig] Last page content (up to 500 chars): %s", snippet)
+			log.Printf("[DetectConfig] Last URL: %s", safeURLForLog(currentURL))
+			log.Printf("[DetectConfig] Last page content length: %d bytes", len(content))
 			log.Printf("[DetectConfig] This may be a non-ESurfing portal or the portal page has a different format")
 			return ConfigResult{Status: StatusRequestError}
 		}
@@ -182,27 +173,27 @@ func DetectConfigWithClient(httpClient *http.Client, state StateProvider, verbos
 	result.AuthURL = extractXMLTag(portalConfig, "auth-url")
 	result.TicketURL = extractXMLTag(portalConfig, "ticket-url")
 	if verbose {
-		log.Printf("[DetectConfig] AuthURL: %s", result.AuthURL)
-		log.Printf("[DetectConfig] TicketURL: %s", result.TicketURL)
+		log.Printf("[DetectConfig] AuthURL: %s", safeURLForLog(result.AuthURL))
+		log.Printf("[DetectConfig] TicketURL: %s", safeURLForLog(result.TicketURL))
 	}
 
 	// Parse extra config URLs from funcfg elements
 	parseFuncCfg(portalConfig, result.ExtraCfgURL)
 	if verbose {
 		for k, v := range result.ExtraCfgURL {
-			log.Printf("[DetectConfig] ExtraCfg: %s = %s", k, v)
+			log.Printf("[DetectConfig] ExtraCfg: %s = %s", k, safeURLForLog(v))
 		}
 	}
 
 	if result.AuthURL == "" || result.TicketURL == "" {
-		log.Printf("[DetectConfig] Missing AuthURL or TicketURL (auth=%q, ticket=%q)", result.AuthURL, result.TicketURL)
+		log.Printf("[DetectConfig] Missing AuthURL or TicketURL (authPresent=%t, ticketPresent=%t)", result.AuthURL != "", result.TicketURL != "")
 		return ConfigResult{Status: StatusRequestError}
 	}
 
 	// Parse userIp and acIp from ticket URL
 	parsedURL, err := url.Parse(result.TicketURL)
 	if err != nil {
-		log.Printf("[DetectConfig] Failed to parse TicketURL: %v", err)
+		log.Printf("[DetectConfig] Failed to parse TicketURL %s: %v", safeURLForLog(result.TicketURL), err)
 		return ConfigResult{Status: StatusRequestError}
 	}
 

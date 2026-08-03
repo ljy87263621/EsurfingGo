@@ -1,0 +1,8 @@
+{
+  "user": "18900000000",
+  "password": "your-password",
+  "network": 0,
+  "log_file": "esurfing.log",
+  "save_credentials": false,
+  "start_with_windows": false
+}

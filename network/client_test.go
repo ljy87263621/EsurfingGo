@@ -1,9 +1,12 @@
 package network
 
 import (
+	"bytes"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -70,5 +73,49 @@ func TestPostRedirectPreservesBody(t *testing.T) {
 	}
 	if respBody != payload {
 		t.Fatalf("Post response body = %q, want %q", respBody, payload)
+	}
+}
+
+func TestPostNonSuccessLogOmitsResponseBody(t *testing.T) {
+	state := &testState{
+		clientID: "cid-test",
+		algoID:   "00000000-0000-0000-0000-000000000000",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("passwd=secret-pass&ticket=ticket-value"))
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOutput)
+
+	_, err := Post(NewHTTPClient(state), server.URL+"?token=query-secret", "payload", state, nil)
+	if err != nil {
+		t.Fatalf("Post returned error: %v", err)
+	}
+
+	logs := buf.String()
+	for _, secret := range []string{"secret-pass", "ticket-value"} {
+		if strings.Contains(logs, secret) {
+			t.Fatalf("log leaked response body secret %q: %s", secret, logs)
+		}
+	}
+	if strings.Contains(logs, "query-secret") {
+		t.Fatalf("log leaked URL query secret: %s", logs)
+	}
+	if !strings.Contains(logs, "body=38 bytes") {
+		t.Fatalf("log did not report response body length: %s", logs)
+	}
+}
+
+func TestSafeURLForLogStripsQueryAndFragment(t *testing.T) {
+	got := safeURLForLog("https://portal.example/auth?token=secret#frag")
+	want := "https://portal.example/auth"
+	if got != want {
+		t.Fatalf("safeURLForLog() = %q, want %q", got, want)
 	}
 }

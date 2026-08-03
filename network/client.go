@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -40,7 +41,7 @@ type redirectInterceptor struct {
 func (r *redirectInterceptor) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := r.inner.RoundTrip(req)
 	if err != nil {
-		log.Printf("[Redirect] RoundTrip error for %s %s: %v", req.Method, req.URL.String(), err)
+		log.Printf("[Redirect] RoundTrip error for %s %s: %v", req.Method, safeURLForLog(req.URL.String()), err)
 		return resp, err
 	}
 
@@ -66,7 +67,7 @@ func (r *redirectInterceptor) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 
 		location := resp.Header.Get("Location")
-		log.Printf("[Redirect] #%d %d -> %s", redirectCount, resp.StatusCode, location)
+		log.Printf("[Redirect] #%d %d -> %s", redirectCount, resp.StatusCode, safeURLForLog(location))
 		if location == "" {
 			log.Println("[Redirect] Empty Location header, stopping redirect chain")
 			break
@@ -156,6 +157,10 @@ func NewHTTPClient(state StateProvider, baseTransport ...http.RoundTripper) *htt
 	if len(baseTransport) > 0 && baseTransport[0] != nil {
 		inner = baseTransport[0]
 	}
+	inner = &captivePortalTransport{
+		base:     inner,
+		resolver: newDefaultDoHResolver(),
+	}
 	transport := &redirectInterceptor{
 		inner:    inner,
 		state:    state,
@@ -179,7 +184,7 @@ func NewHTTPClient(state StateProvider, baseTransport ...http.RoundTripper) *htt
 func Post(client *http.Client, url, data string, state StateProvider, extraHeaders map[string]string) (string, error) {
 	req, err := http.NewRequest("POST", url, strings.NewReader(data))
 	if err != nil {
-		log.Printf("[Post] Failed to create request for %s: %v", url, err)
+		log.Printf("[Post] Failed to create request for %s: %v", safeURLForLog(url), err)
 		return "", fmt.Errorf("create request: %w", err)
 	}
 
@@ -209,14 +214,14 @@ func Post(client *http.Client, url, data string, state StateProvider, extraHeade
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[Post] Request to %s failed: %v", url, err)
+		log.Printf("[Post] Request to %s failed: %v", safeURLForLog(url), err)
 		return "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("[Post] Failed to read body from %s: %v", url, err)
+		log.Printf("[Post] Failed to read body from %s: %v", safeURLForLog(url), err)
 		return "", fmt.Errorf("read body: %w", err)
 	}
 	if len(body) == 0 {
@@ -224,11 +229,11 @@ func Post(client *http.Client, url, data string, state StateProvider, extraHeade
 		if resp.Request != nil && resp.Request.URL != nil {
 			finalURL = resp.Request.URL.String()
 		}
-		log.Printf("[Post] Empty response body from %s (status=%d, finalURL=%s)", url, resp.StatusCode, finalURL)
+		log.Printf("[Post] Empty response body from %s (status=%d, finalURL=%s)", safeURLForLog(url), resp.StatusCode, safeURLForLog(finalURL))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("[Post] %s returned %d: %s", url, resp.StatusCode, string(body))
+		log.Printf("[Post] %s returned %d: body=%d bytes", safeURLForLog(url), resp.StatusCode, len(body))
 	}
 
 	return string(body), nil
@@ -238,7 +243,7 @@ func Post(client *http.Client, url, data string, state StateProvider, extraHeade
 func PostRaw(client *http.Client, url, data string, state StateProvider) ([]byte, error) {
 	req, err := http.NewRequest("POST", url, strings.NewReader(data))
 	if err != nil {
-		log.Printf("[PostRaw] Failed to create request for %s: %v", url, err)
+		log.Printf("[PostRaw] Failed to create request for %s: %v", safeURLForLog(url), err)
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
@@ -263,18 +268,18 @@ func PostRaw(client *http.Client, url, data string, state StateProvider) ([]byte
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[PostRaw] Request to %s failed: %v", url, err)
+		log.Printf("[PostRaw] Request to %s failed: %v", safeURLForLog(url), err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("[PostRaw] %s returned status %d", url, resp.StatusCode)
+		log.Printf("[PostRaw] %s returned status %d", safeURLForLog(url), resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("[PostRaw] Failed to read body from %s: %v", url, err)
+		log.Printf("[PostRaw] Failed to read body from %s: %v", safeURLForLog(url), err)
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if len(body) == 0 {
@@ -282,8 +287,18 @@ func PostRaw(client *http.Client, url, data string, state StateProvider) ([]byte
 		if resp.Request != nil && resp.Request.URL != nil {
 			finalURL = resp.Request.URL.String()
 		}
-		log.Printf("[PostRaw] Empty response body from %s (status=%d, finalURL=%s)", url, resp.StatusCode, finalURL)
+		log.Printf("[PostRaw] Empty response body from %s (status=%d, finalURL=%s)", safeURLForLog(url), resp.StatusCode, safeURLForLog(finalURL))
 	}
 
 	return body, nil
+}
+
+func safeURLForLog(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return "<invalid URL>"
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }

@@ -1,21 +1,84 @@
 # EsurfingGo
 
-> 中国电信天翼校园网（ESurfing）自动认证拨号客户端的 Go 语言实现。由于我无法测试各个学校的情况，出现问题时，欢迎提交issue并贴上日志。
+中国电信天翼校园网（ESurfing）第三方认证客户端。项目使用 Go 编写，Windows 版本提供轻量原生 GUI，可作为本机天翼客户端的替代品；命令行版本同时适合 Linux、macOS、服务器和路由器部署。
 
-## 功能
+> 当前正式版本：`v1.2.0`
+>
+> 这是第三方实现，不是中国电信官方软件。不同学校的门户配置可能存在差异，首次使用请保留脱敏日志。
+
+## 功能概览
 
 - 自动检测强制门户（Captive Portal）并完成认证
 - 自动心跳保活，断线自动重连
 - 跨平台编译（Windows / Linux / macOS）
 - Go编译后为单文件且无须依赖，便于路由器部署
 - 支持多拨
+- Windows 轻量原生 GUI，不依赖 Qt、Electron 或额外运行时
+- 选择、刷新网络接口，避免认证流量进入 Clash/Mihomo 等虚拟网卡
+- 最小化到系统托盘，托盘菜单支持恢复窗口和退出
+- 可选保存账号密码和网卡选择；本地配置为明文 JSON
+- 可选当前用户开机启动，并使用已保存账号密码自动认证
+- Clash Verge TUN 开启时，针对 Fake-IP 门户探测做了专门兼容
+- 单文件发布，支持 Windows、Linux、macOS 以及常见路由器架构
+- 支持命令行预填短信验证码参数，以兼容少数明确要求短信验证的门户
 
-## 使用
+## Windows GUI
 
-[Release](https://github.com/xxmod/EsurfingGo/releases/latest)中有最新版本下载，可以直接下载使用
+### 直接使用
+
+从 [Releases](https://github.com/ljy87263621/EsurfingGo/releases/latest) 下载 `EsurfingGo-v1.2.0-windows-amd64.zip`，解压到一个固定目录后双击 `esurfing-windows-amd64.exe`。Windows 10/11 原生系统即可运行，不需要安装 Go、Python、Qt 或其他运行库。
+
+GUI 的主要控件如下：
+
+| 控件 | 作用 |
+| --- | --- |
+| 账号、密码 | 填写校园网认证凭据；密码输入框会以密码形式显示 |
+| 网卡下拉框 | 选择认证使用的网卡；“自动选择”由程序按系统路由处理 |
+| 刷新网卡 | 重新读取当前可用的物理 IPv4 网卡，不阻塞窗口 |
+| 登录并保持 | 启动检测、认证和心跳保活 |
+| 停止/注销 | 停止客户端循环，并在已登录时发送注销请求 |
+| 保存账号密码 | 保存账号、密码和网卡选择到 exe 同目录的 `esurfing.local.json` |
+| 开机自动启动并认证 | 写入当前用户启动项；登录 Windows 后隐藏到托盘并自动认证 |
+| 窗口最小化 | 隐藏到系统托盘，不停止认证；托盘左键恢复，右键打开菜单 |
+
+开机自动认证要求同时满足以下条件：
+
+1. 勾选“保存账号密码”；
+2. 账号和密码均不为空；
+3. exe 位于一个登录用户可访问的固定目录。
+
+配置文件中的密码是明文，仅建议在个人电脑本地使用，不要提交 Git、同步网盘或发送给他人。取消“保存账号密码”后，GUI 会清除配置文件中的账号和密码。
+
+### GUI 使用建议
+
+1. 第一次启动先点击“刷新网卡”。
+2. 选择实际承载校园网连接的“以太网”或“WLAN”，不要选择 Clash、Mihomo、Wintun、WireGuard、TAP 等虚拟接口。
+3. 填写账号和密码，先点击“登录并保持”观察日志。
+4. 确认认证和心跳稳定后，再按需勾选保存账密、托盘运行或开机自动认证。
+
+GUI 不提供手工短信验证码输入框。普通校园网认证通常不需要用户输入验证码；命令行仍保留兼容参数，详见下文。协议内部的自动 `challenge` 是认证报文参数，不等于用户收到的短信验证码。
+
+## Clash Verge TUN 兼容说明
+
+开启 Clash Verge 的 TUN 模式后，系统 DNS 可能把 `connect.rom.miui.com` 解析为 `198.18.x.x` 或 `198.19.x.x` Fake-IP。若认证流量已经绑定到物理网卡，直接连接这个地址会导致门户探测超时，即使 Clash 代理本身仍然可以上网。
+
+v1.2.0 对这个场景做了分层处理：
+
+- 自动排除常见 Clash/Mihomo/Wintun/TUN/TAP 等虚拟网卡，将认证 HTTP/TCP 流量绑定到可用物理 IPv4 网卡。
+- 仅给门户探测请求增加专用处理：通过当前系统代理访问 DoH，获取真实 IPv4，并过滤 `198.18.0.0/15` Fake-IP。
+- 连接真实 IP 时保留原始 `Host`，因此仍按门户域名访问。
+- Ticket、Auth、Heartbeat、注销等认证请求仍走物理网卡绑定的原有传输，不会把“代理能联网”误判为“校园网已认证”。
+- 程序不会修改 Clash 配置、系统代理、默认路由或系统 DNS。
+
+日志中的 `HTTP 204` 表示门户探测确认可以访问公网；只有随后出现认证成功、登录保持或心跳成功日志时，才表示校园网认证流程完成。
+
+如果 TUN 开启后导致整机断网，优先在 Clash Verge 中关闭 TUN，等待路由恢复后再继续操作。正式实例不要反复启动多个副本；测试 TUN 时请使用单独目录、配置和日志。
+
+## 命令行使用
 
 ```bash
-esurfing -u <用户名> -p <密码> [-s <短信验证码>] [-n <网络接口号>]
+esurfing -u <用户名> -p <密码> [-c <短信验证码>] [-n <网络接口号>]
+esurfing -config <配置文件> [-log-file <日志文件>]
 ```
 
 ### 参数
@@ -24,9 +87,11 @@ esurfing -u <用户名> -p <密码> [-s <短信验证码>] [-n <网络接口号>
 | ---------------------- | ---------------------- |
 | `-u` / `-user`     | 登录用户名             |
 | `-p` / `-password` | 登录密码               |
-| `-c` / `-sms`      | 预填短信验证码（可选） |
+| `-c` / `-sms`      | 可选的短信验证兼容参数；普通校园网登录无需填写，GUI 不提供该输入项 |
 | `-s` / `--show`    | 查看网络接口          |
 | `-n` / `--network` | 使用指定网络接口认证   |
+| `-config`           | 从 JSON 配置文件读取账号、密码、网卡、日志配置 |
+| `-log-file`         | 同时把日志追加写入指定文件 |
 
 ### 示例
 
@@ -34,8 +99,8 @@ esurfing -u <用户名> -p <密码> [-s <短信验证码>] [-n <网络接口号>
 # 基本登录
 esurfing -u 13800138000 -p mypassword
 
-# 携带短信验证码
-esurfing -u 13800138000 -p mypassword -s 123456
+# 仅在门户明确要求短信验证时使用
+esurfing -u 13800138000 -p mypassword -c 123456
 
 #指定特定网络接口，如wifi进行拨号
 esurfing  -s
@@ -45,33 +110,42 @@ esurfing  -s
 
 esurfing -n 2 -u 13800138000 -p mypassword
 
+# Windows 本机长期运行可使用配置文件
+esurfing -config .\esurfing.local.json -log-file .\logs\esurfing.log
+
 ```
 
 程序启动后会自动检测网络状态，完成认证并保持连接。按 `Ctrl+C` 安全退出。
 
 ## 部署方法
 
-### 1. 直接运行
+### Windows 本机替代客户端
 
-```bash
-./esurfing -u <用户名> -p <密码>
+Windows 用户优先使用上面的 Portable GUI。需要脚本化运行时，可以查看网卡并使用配置文件：
+
+```powershell
+.\esurfing-windows-amd64.exe -s
+Copy-Item .\esurfing.example.json .\esurfing.local.json
+.\esurfing-windows-amd64.exe -config .\esurfing.local.json -log-file .\logs\esurfing.log
 ```
 
-在进行后面的部署之前请先运行一次确保程序在你当前的网络环境可用，如不可用，可以贴上日志发issue
+GUI 账密保存、托盘和开机认证的完整说明见 [`docs/windows-local.md`](docs/windows-local.md)。也可以使用其中的 PowerShell 脚本注册当前用户计划任务。
 
-### 2. 后台服务部署（Linux Systemd）
+### Linux Systemd
 
 创建服务文件 `/etc/systemd/system/esurfing.service`：
 
 ````ini
 [Unit]
-Description=EsuringGo Campus Network Authenticator
-After=network.target
+Description=EsurfingGo Campus Network Authenticator
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart= #应用路径
+ExecStart=/usr/local/bin/esurfing -config /etc/esurfing/esurfing.json
 Restart=always
+RestartSec=5
 User=root
 
 [Install]
@@ -87,140 +161,98 @@ sudo systemctl start esurfing #启动程序
 sudo systemctl status esurfing #查看状态
 ```
 
-### 3. 路由器部署（OpenWrt / DD-WRT）
+### OpenWrt / DD-WRT / 梅林
 
-将编译好的二进制文件上传至路由器 `/usr/bin/`，并添加开机启动脚本：
-
-```bash
-# 添加执行权限
-chmod +x /usr/bin/esurfing #此处的esurfing根据你release或者编译的名字更改
-
-# 编辑rc.local配置自启动
-nano /etc/rc.local
-#最后一行添加 /usr/bin/esurfing -u <用户名> -p <密码>
-#ctrl+o保存 ctrl+x关闭编辑器
-```
-
-若为梅林固件，可以在/jffs/scripts/添加services-start
+将对应架构的二进制上传到路由器，例如 `/usr/bin/esurfing`，添加执行权限后，在固件提供的启动脚本中运行：
 
 ```bash
-#!/bin/sh
-#此脚本为梅林专用
-i=0
-while [ $i -le 30 ]; do
-    success_start_service=$(nvram get success_start_service)
-    if [ "$success_start_service" == "1" ]; then
-        break
-    fi
-    i=$(($i+1))
-    sleep 1
-done
-
-logger -t "CustomScript" "My services-start script executed successfully."
-
-sleep 5
-
-<外部存储位置>/start.sh > /tmp/home/root/Esurfinglog.txt 2>&1 & 
-#上文start.sh为与esurfing相同的目录，内容为启动命令，如./esurfing-linux-armv5 -u 123123 -p 212121
-
-exit 0
-
+chmod +x /usr/bin/esurfing
+/usr/bin/esurfing -u <用户名> -p <密码> >> /tmp/esurfing.log 2>&1 &
 ```
 
-start.sh可参考我的写法
-
-```bash
-#!/bin/sh
-while true;do
-    <绝对路径>/esurfing-linux-arm5 -u 123321 -p 212121
-done
-```
+路由器部署时请使用权限受限的配置文件，避免把明文密码暴露给普通用户或日志系统。
 
 ## 构建方法
 
-### 1. 基础构建（推荐）
+### 本机构建
 
 ```bash
-go build -o esurfing .
+go build -trimpath -ldflags="-s -w" -o esurfing .
 ```
 
-生成的 `esurfing.exe`（Windows）或 `esurfing`（Linux/macOS）即为可执行文件。
+Windows 原生 GUI 使用默认构建入口，不依赖 Qt、Electron、.NET Runtime 或其他额外运行库。
 
-### 2. 跨平台编译脚本
+### 跨平台构建
 
-项目提供自动化构建脚本，支持多平台打包：
+PowerShell 脚本会构建 Windows、Linux、macOS 以及常见路由器架构，输出到 `bin/`：
 
-- **Windows (PowerShell)**:
+```powershell
+.\build.ps1
+```
 
-  ```powershell
-  .\build.ps1
-  ```
-- **Linux / macOS (Bash)**:
-
-  ```bash
-  chmod +x build.sh
-  ./build.sh
-  ```
-
-> 📌 参考 `EsurfingDialer` 项目的构建逻辑，脚本会自动设置 `CGO_ENABLED=0` 以确保静态链接，避免运行时依赖。
-
-### 3. 旧设备兼容构建
-
-针对 ARMv5 架构设备，需指定环境变量：
+Linux/macOS 可使用：
 
 ```bash
-GOARM=5 CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -o esurfing-arm5 .
+chmod +x build.sh
+./build.sh
 ```
+
+也可以手动构建 ARMv5：
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 go build -trimpath -ldflags="-s -w" -o esurfing-linux-armv5 .
+```
+
+正式发布的 Windows 资产为 `EsurfingGo-v1.2.0-windows-amd64.zip`，包含可执行文件、README、许可证、配置模板和 Windows 本机说明；无需用户安装 Go 或其他运行环境。
 
 ## 测试验证
 
-构建后建议运行完整测试套件：
+提交或发布前运行：
 
 ```bash
-go test ./... -v
+gofmt -w *.go network/*.go cipher/*.go utils/*.go model/*.go
+go test ./... -count=1
+go test -race ./...
+go vet ./...
+git diff --check
 ```
 
-特别关注 `cipher/` 模块的加解密一致性测试，确保协议兼容性。
+Windows 交叉编译检查：
+
+```powershell
+$env:CGO_ENABLED = "0"
+$env:GOOS = "windows"
+$env:GOARCH = "amd64"
+go test ./... -run '^$' -count=1
+go build -trimpath -ldflags='-s -w' -o dist\EsurfingGo-v1.2.0\esurfing-windows-amd64.exe .
+```
 
 ## 项目结构
 
-```
-├── main.go              # 入口
-├── client.go            # 认证客户端主逻辑
-├── session.go           # 会话与加密管理
-├── states.go            # 全局状态（线程安全）
-├── constants.go         # 常量定义
-├── iface.go             # 网络接口列表与绑定
-├── cipher/              # 加密算法实现
-│   ├── cipher.go        #   工厂函数
-│   ├── keydata.go       #   密钥数据
-│   ├── aescbc.go        #   AES-CBC
-│   ├── aesecb.go        #   AES-ECB
-│   ├── desedecbc.go     #   3DES-CBC
-│   ├── desedeecb.go     #   3DES-ECB
-│   ├── sm4cbc.go        #   SM4-CBC
-│   ├── sm4ecb.go        #   SM4-ECB
-│   ├── modxtea.go       #   ModXTEA
-│   ├── modxteaxteaiv.go #   ModXTEA-XTEAIV
-│   └── zuc.go           #   ZUC-128
-├── network/             # 网络模块
-│   ├── client.go        #   HTTP 客户端
-│   └── connectivity.go  #   门户检测
-├── utils/               # 工具函数
-│   └── utils.go
-└── model/               # 数据模型
-    └── model.go
+```text
+main.go                 # CLI 入口和 Windows GUI/CLI 模式选择
+client.go               # 认证客户端主逻辑
+config.go               # JSON 配置和日志文件配置
+gui_windows.go          # Windows 原生 GUI、托盘和异步操作
+gui_common.go            # GUI 共用状态和更新逻辑
+autostart_windows.go     # 当前用户开机启动
+iface.go                 # 网络接口筛选与物理网卡绑定
+network/                 # HTTP、门户探测、TUN 兼容传输
+cipher/                  # AES、3DES、SM4、ZUC 等协议算法
+model/                   # 协议数据模型
+utils/                   # 通用工具函数
+docs/windows-local.md    # Windows 本机运行和断网恢复说明
+scripts/                 # 本地网络采集与计划任务辅助脚本
 ```
 
 ## 依赖
 
-- [gmsm](https://github.com/emmansun/gmsm) — 国密 SM4 / ZUC 算法
-- [google/uuid](https://github.com/google/uuid) — UUID 生成
+- [gmsm](https://github.com/emmansun/gmsm) - 国密 SM4 / ZUC 算法
+- [google/uuid](https://github.com/google/uuid) - UUID 生成
+- Windows GUI 使用 Win32 原生 API，不依赖 Qt、Electron 或 .NET Runtime
 
-## 许可证
+## 许可证与来源
 
-MIT
+本项目使用 [MIT License](LICENSE)。项目结构与协议解析逻辑继承自 [Rsplwe/EsurfingDialer](https://github.com/Rsplwe/EsurfingDialer)，并在此基础上维护 Go 版本、Windows GUI、本地配置、开机启动和 TUN 兼容逻辑。
 
----
-
-> 项目结构与协议解析逻辑继承自  `Rsplwe/EsurfingDialer`，但采用更清晰的状态机与工厂模式重构，便于维护与扩展。如果喜欢这个项目，请帮忙点个star
+使用本软件前，请确认符合所在学校网络和当地法律法规。项目维护者不对校园网策略变化、账号安全或网络中断承担责任。

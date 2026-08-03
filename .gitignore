@@ -29,6 +29,10 @@ Thumbs.db
 /dist/
 /bin/
 
+# Local runtime config/logs
+esurfing.local.json
+*.log
+
 # Decompilation artifacts
 *.jar
 decompiled/

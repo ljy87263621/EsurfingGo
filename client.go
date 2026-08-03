@@ -36,9 +36,10 @@ type Client struct {
 
 // Options holds login credentials.
 type Options struct {
-	LoginUser     string
-	LoginPassword string
-	SMSCode       string
+	LoginUser       string
+	LoginPassword   string
+	SMSCode         string
+	SMSCodeProvider SMSCodeProvider
 }
 
 func NewClient(opts Options, states *States, session *Session, baseTransport ...http.RoundTripper) *Client {
@@ -123,11 +124,16 @@ func (c *Client) authorization() {
 	var code string
 	if strings.TrimSpace(c.options.SMSCode) == "" {
 		code = c.checkSMSVerify()
+		if !c.states.IsRunning() {
+			return
+		}
 	} else {
 		code = c.options.SMSCode
 	}
 
-	fmt.Printf("SMS Code is: %s\n", code)
+	if code != "" {
+		log.Println("[Client] SMS verification code provided.")
+	}
 
 	c.initSession()
 
@@ -155,7 +161,7 @@ func (c *Client) authorization() {
 		return
 	}
 	c.states.SetTicket(ticket)
-	log.Printf("[Client] Ticket: %s", c.states.GetTicket())
+	log.Printf("[Client] Ticket acquired (%s)", previewForLog(c.states.GetTicket()))
 
 	if err := c.login(code); err != nil {
 		log.Printf("Login error: %v", err)
@@ -179,6 +185,13 @@ func (c *Client) checkSMSVerify() string {
 	if network.CheckVerifyCodeStatus(c.states, c.httpClient, c.options.LoginUser, extraCfg) &&
 		network.GetVerifyCode(c.states, c.httpClient, c.options.LoginUser, extraCfg) {
 		log.Println("This login requires a SMS verification code.")
+		if c.options.SMSCodeProvider != nil {
+			code, ok := c.options.SMSCodeProvider.Wait()
+			if !ok {
+				return ""
+			}
+			return code
+		}
 		reader := bufio.NewReader(os.Stdin)
 		for {
 			fmt.Print("Input Code: ")
@@ -193,7 +206,7 @@ func (c *Client) checkSMSVerify() string {
 }
 
 func (c *Client) initSession() {
-	log.Printf("[Client] Initializing session, TicketURL: %s, AlgoID: %s", c.states.GetTicketURL(), c.states.GetAlgoID())
+	log.Printf("[Client] Initializing session, TicketURL supplied (%s), AlgoID: %s", previewForLog(c.states.GetTicketURL()), c.states.GetAlgoID())
 	body, err := network.PostRaw(c.httpClient, c.states.GetTicketURL(), c.states.GetAlgoID(), c.states)
 	if err != nil {
 		log.Printf("[Client] Init session error: %v", err)
@@ -226,23 +239,23 @@ func (c *Client) getTicket() (string, error) {
 		c.states.GetAcIP(),
 	)
 
-	log.Printf("[Client] getTicket payload: %s", payload)
+	log.Printf("[Client] getTicket payload prepared (%s)", previewForLog(payload))
 	encrypted, err := c.session.Encrypt(payload)
 	if err != nil {
 		return "", fmt.Errorf("encrypt ticket payload: %w", err)
 	}
-	log.Printf("[Client] getTicket encrypted (first 200): %.200s", encrypted)
+	log.Printf("[Client] getTicket encrypted payload prepared (%s)", previewForLog(encrypted))
 	data, err := network.Post(c.httpClient, c.states.GetTicketURL(), encrypted, c.states, nil)
 	if err != nil {
 		return "", err
 	}
-	log.Printf("[Client] getTicket raw response (first 500): %.500s", data)
+	log.Printf("[Client] getTicket raw response received (%s)", previewForLog(data))
 
 	decrypted, err := c.session.Decrypt(data)
 	if err != nil {
 		return "", fmt.Errorf("decrypt ticket response: %w", err)
 	}
-	log.Printf("[Client] getTicket decrypted: %s", decrypted)
+	log.Printf("[Client] getTicket response decrypted (%s)", previewForLog(decrypted))
 	ticket := extractXMLTag(decrypted, "ticket")
 	return ticket, nil
 }
@@ -271,29 +284,29 @@ func (c *Client) login(code string) error {
 		verify,
 	)
 
-	log.Printf("[Client] login payload: %s", payload)
+	log.Printf("[Client] login payload prepared (%s)", previewForLog(payload))
 	encrypted, err := c.session.Encrypt(payload)
 	if err != nil {
 		return fmt.Errorf("encrypt login payload: %w", err)
 	}
-	log.Printf("[Client] login encrypted (first 200): %.200s", encrypted)
+	log.Printf("[Client] login encrypted payload prepared (%s)", previewForLog(encrypted))
 	data, err := network.Post(c.httpClient, c.states.GetAuthURL(), encrypted, c.states, nil)
 	if err != nil {
 		return err
 	}
-	log.Printf("[Client] login raw response (first 500): %.500s", data)
+	log.Printf("[Client] login raw response received (%s)", previewForLog(data))
 
 	decrypted, err := c.session.Decrypt(data)
 	if err != nil {
 		return fmt.Errorf("decrypt login response: %w", err)
 	}
-	log.Printf("[Client] login decrypted: %s", decrypted)
+	log.Printf("[Client] login response decrypted (%s)", previewForLog(decrypted))
 	c.keepURL = extractXMLTag(decrypted, "keep-url")
 	c.termURL = extractXMLTag(decrypted, "term-url")
 	c.keepRetry = extractXMLTag(decrypted, "keep-retry")
 
-	log.Printf("Keep Url: %s", c.keepURL)
-	log.Printf("Term Url: %s", c.termURL)
+	log.Printf("Keep Url received (%s)", previewForLog(c.keepURL))
+	log.Printf("Term Url received (%s)", previewForLog(c.termURL))
 	log.Printf("Keep Retry: %s", c.keepRetry)
 
 	return nil

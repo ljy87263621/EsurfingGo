@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -14,8 +15,9 @@ type NetworkInterface struct {
 	Name  string // OS-reported interface name (e.g. "以太网", "WLAN", "eth0")
 }
 
-// ListNetworkInterfaces returns all network interfaces that are up and non-loopback.
-// Uses Go's standard net.Interfaces() which works across Windows, Linux, and macOS.
+// ListNetworkInterfaces returns usable IPv4 interfaces that are up and non-loopback.
+// Known tunnel and virtual adapters are excluded because they cannot carry the
+// campus authentication traffic when a system-wide TUN route is active.
 func ListNetworkInterfaces() ([]NetworkInterface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -25,12 +27,7 @@ func ListNetworkInterfaces() ([]NetworkInterface, error) {
 	var result []NetworkInterface
 	idx := 1
 	for _, iface := range ifaces {
-		// Skip loopback interfaces
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		// Skip interfaces that are not up
-		if iface.Flags&net.FlagUp == 0 {
+		if !shouldListNetworkInterface(iface, interfaceHasIPv4(iface)) {
 			continue
 		}
 		result = append(result, NetworkInterface{
@@ -45,6 +42,125 @@ func ListNetworkInterfaces() ([]NetworkInterface, error) {
 	}
 
 	return result, nil
+}
+
+func shouldListNetworkInterface(iface net.Interface, hasIPv4 bool) bool {
+	if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+		return false
+	}
+	if iface.Flags&net.FlagPointToPoint != 0 || !hasIPv4 {
+		return false
+	}
+	return !isLikelyVirtualInterfaceName(iface.Name)
+}
+
+func interfaceHasIPv4(iface net.Interface) bool {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		var ip net.IP
+		switch value := addr.(type) {
+		case *net.IPNet:
+			ip = value.IP
+		case *net.IPAddr:
+			ip = value.IP
+		}
+		if ip != nil && ip.To4() != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func isLikelyVirtualInterfaceName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, marker := range []string{
+		"clash",
+		"mihomo",
+		"wintun",
+		"tun",
+		"tap",
+		"wireguard",
+		"tailscale",
+		"zerotier",
+		"npcap",
+		"loopback",
+		"virtual",
+		"miniport",
+		"vethernet",
+		"hyper-v",
+		"hyperv",
+		"wsl",
+		"本地连接*",
+	} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLikelyTunnelInterface() (bool, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect network interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		if isActiveLikelyTunnelInterface(iface.Name, iface.Flags, interfaceHasIPv4(iface)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isActiveLikelyTunnelInterface(name string, flags net.Flags, hasIPv4 bool) bool {
+	if flags&net.FlagLoopback != 0 || flags&net.FlagUp == 0 || !hasIPv4 {
+		return false
+	}
+	return isLikelyTunnelInterfaceName(name)
+}
+
+func isLikelyTunnelInterfaceName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, marker := range []string{
+		"clash",
+		"mihomo",
+		"wintun",
+		"tun",
+		"tap",
+		"wireguard",
+		"tailscale",
+		"zerotier",
+	} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// NewTUNSafeHTTPTransport returns a direct transport bound to the first usable
+// physical interface when a likely system TUN adapter is present. A nil
+// transport means normal OS routing is safe to keep using.
+func NewTUNSafeHTTPTransport() (*http.Transport, string, error) {
+	active, err := hasLikelyTunnelInterface()
+	if err != nil || !active {
+		return nil, "", err
+	}
+
+	ifaces, err := ListNetworkInterfaces()
+	if err != nil {
+		return nil, "", err
+	}
+	for i := range ifaces {
+		transport, bindErr := NewBoundHTTPTransport(&ifaces[i])
+		if bindErr == nil {
+			return transport, ifaces[i].Name, nil
+		}
+	}
+	return nil, "", fmt.Errorf("TUN is active but no usable physical IPv4 interface was found")
 }
 
 // PrintNetworkInterfaces prints all available interfaces in the format "1：name".
@@ -108,6 +224,38 @@ func NewBoundHTTPTransport(iface *NetworkInterface) (*http.Transport, error) {
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
+	if err := configureDialerForInterface(dialer, netIface.Index); err != nil {
+		return nil, fmt.Errorf("failed to bind socket to interface %q: %w", iface.Name, err)
+	}
+
+	// Windows' native resolver can send DNS through a TUN adapter even when
+	// the eventual TCP connection is bound to the physical interface. Use the
+	// Go resolver and bind its UDP/TCP DNS sockets to the same interface.
+	dnsUDPDialer := &net.Dialer{
+		LocalAddr: &net.UDPAddr{IP: localIP},
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	if err := configureDialerForInterface(dnsUDPDialer, netIface.Index); err != nil {
+		return nil, fmt.Errorf("failed to bind DNS socket to interface %q: %w", iface.Name, err)
+	}
+	dnsTCPDialer := &net.Dialer{
+		LocalAddr: &net.TCPAddr{IP: localIP},
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	if err := configureDialerForInterface(dnsTCPDialer, netIface.Index); err != nil {
+		return nil, fmt.Errorf("failed to bind DNS TCP socket to interface %q: %w", iface.Name, err)
+	}
+	dialer.Resolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if network == "tcp" || network == "tcp4" {
+				return dnsTCPDialer.DialContext(ctx, "tcp4", address)
+			}
+			return dnsUDPDialer.DialContext(ctx, "udp4", address)
+		},
+	}
 
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -120,4 +268,11 @@ func NewBoundHTTPTransport(iface *NetworkInterface) (*http.Transport, error) {
 	}
 
 	return transport, nil
+}
+
+func boundResolverNetwork(network string) string {
+	if network == "udp" {
+		return "udp4"
+	}
+	return network
 }

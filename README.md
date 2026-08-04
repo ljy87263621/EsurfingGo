@@ -2,7 +2,7 @@
 
 中国电信天翼校园网（ESurfing）第三方认证客户端。项目使用 Go 编写，Windows 版本提供轻量原生 GUI，可作为本机天翼客户端的替代品；命令行版本同时适合 Linux、macOS、服务器和路由器部署。
 
-> 当前正式版本：`v1.2.0`
+> 当前正式版本：`v1.2.1`
 >
 > 这是第三方实现，不是中国电信官方软件。不同学校的门户配置可能存在差异，首次使用请保留脱敏日志。
 
@@ -26,7 +26,9 @@
 
 ### 直接使用
 
-从 [Releases](https://github.com/ljy87263621/EsurfingGo/releases/latest) 下载 `EsurfingGo-v1.2.0-windows-amd64.zip`，解压到一个固定目录后双击 `esurfing-windows-amd64.exe`。Windows 10/11 原生系统即可运行，不需要安装 Go、Python、Qt 或其他运行库。
+从 [Releases](https://github.com/ljy87263621/EsurfingGo/releases/latest) 下载 `EsurfingGo-v1.2.1-windows-amd64.zip`，解压到一个固定目录后双击 `esurfing-windows-amd64.exe`。Windows 10/11 原生系统即可运行，不需要安装 Go、Python、Qt 或其他运行库。
+
+Windows GUI 和系统托盘使用项目内嵌的 `assets/esurfing.ico` 图标，Portable 压缩包不需要额外携带图标文件。
 
 GUI 的主要控件如下：
 
@@ -62,7 +64,7 @@ GUI 不提供手工短信验证码输入框。普通校园网认证通常不需�
 
 开启 Clash Verge 的 TUN 模式后，系统 DNS 可能把 `connect.rom.miui.com` 解析为 `198.18.x.x` 或 `198.19.x.x` Fake-IP。若认证流量已经绑定到物理网卡，直接连接这个地址会导致门户探测超时，即使 Clash 代理本身仍然可以上网。
 
-v1.2.0 对这个场景做了分层处理：
+v1.2.1 对这个场景做了分层处理：
 
 - 自动排除常见 Clash/Mihomo/Wintun/TUN/TAP 等虚拟网卡，将认证 HTTP/TCP 流量绑定到可用物理 IPv4 网卡。
 - 仅给门户探测请求增加专用处理：通过当前系统代理访问 DoH，获取真实 IPv4，并过滤 `198.18.0.0/15` Fake-IP。
@@ -203,7 +205,7 @@ chmod +x build.sh
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 go build -trimpath -ldflags="-s -w" -o esurfing-linux-armv5 .
 ```
 
-正式发布的 Windows 资产为 `EsurfingGo-v1.2.0-windows-amd64.zip`，包含可执行文件、README、许可证、配置模板和 Windows 本机说明；无需用户安装 Go 或其他运行环境。
+正式发布的 Windows 资产为 `EsurfingGo-v1.2.1-windows-amd64.zip`，包含可执行文件、README、许可证、配置模板和 Windows 本机说明；无需用户安装 Go 或其他运行环境。
 
 ## 测试验证
 
@@ -224,7 +226,13 @@ $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 go test ./... -run '^$' -count=1
-go build -trimpath -ldflags='-s -w' -o dist\EsurfingGo-v1.2.0\esurfing-windows-amd64.exe .
+go build -trimpath -ldflags='-H=windowsgui -s -w' -o dist\EsurfingGo-v1.2.1\esurfing-windows-amd64.exe .
+```
+
+Windows 图标资源已经以 `esurfing-resource_windows_amd64.syso` 提交到仓库。若替换 `assets/esurfing.ico`，可在仓库根目录用 MinGW `windres` 重新生成：
+
+```powershell
+windres --target=pe-x86-64 -i assets\esurfing.rc -o esurfing-resource_windows_amd64.syso
 ```
 
 ## 项目结构
@@ -235,6 +243,8 @@ client.go               # 认证客户端主逻辑
 config.go               # JSON 配置和日志文件配置
 gui_windows.go          # Windows 原生 GUI、托盘和异步操作
 gui_common.go            # GUI 共用状态和更新逻辑
+assets/esurfing.ico      # Windows GUI 和托盘图标
+assets/esurfing.rc       # Windows 图标资源描述
 autostart_windows.go     # 当前用户开机启动
 iface.go                 # 网络接口筛选与物理网卡绑定
 network/                 # HTTP、门户探测、TUN 兼容传输

@@ -10,6 +10,12 @@ func TestGUIConfigPathUsesExecutableDirectory(t *testing.T) {
 	}
 }
 
+func TestGUIAppIconUsesEmbeddedResource(t *testing.T) {
+	if guiAppIconResourceID == 0 {
+		t.Fatal("application icon resource ID must be non-zero")
+	}
+}
+
 func TestGUIRunMessageMatchesCurrentRun(t *testing.T) {
 	if !guiRunMessageMatches(8, 8) {
 		t.Fatal("current run should accept its completion message")

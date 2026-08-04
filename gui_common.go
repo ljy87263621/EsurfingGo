@@ -6,10 +6,14 @@ import (
 )
 
 const (
-	guiWSBorder       uintptr = 0x00800000
-	guiESAutoHScroll  uintptr = 0x0080
-	guiESPassword     uintptr = 0x0020
-	guiBSAutoCheckbox uintptr = 0x0003
+	guiAppIconResourceID uintptr = 1
+	guiWSBorder          uintptr = 0x00800000
+	guiWSChild           uintptr = 0x40000000
+	guiWSVisible         uintptr = 0x10000000
+	guiWSTabStop         uintptr = 0x00010000
+	guiESAutoHScroll     uintptr = 0x0080
+	guiESPassword        uintptr = 0x0020
+	guiBSAutoCheckbox    uintptr = 0x0003
 )
 
 func guiConfigPath(executablePath string) string {

@@ -20,11 +20,13 @@ for target in "${TARGETS[@]}"; do
   GOOS="${target%/*}"
   GOARCH="${target#*/}"
   output="${OUT}/${APP}-${GOOS}-${GOARCH}"
+  ldflags="$LDFLAGS"
   if [ "$GOOS" = "windows" ]; then
     output="${output}.exe"
+    ldflags="-H=windowsgui ${LDFLAGS}"
   fi
   echo "Building ${GOOS}/${GOARCH} -> ${output}"
-  GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags="$LDFLAGS" -o "$output" .
+  GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -ldflags="$ldflags" -o "$output" .
 done
 
 echo "Done. Binaries in ./${OUT}/"

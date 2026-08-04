@@ -40,12 +40,11 @@ Run these before publishing changes:
 - The Windows release is a Portable package containing the native GUI executable, README, license, config template, and Windows operating notes.
 - The GUI supports tray minimization, local plaintext credential storage, current-user autostart, and Clash/Mihomo TUN-safe portal detection.
 
-## Release v1.2.0
+## Release v1.2.1
 
-- Release name: `EsurfingGo v1.2.0 - Windows Native GUI`
-- Local asset: `dist/EsurfingGo-v1.2.0-windows-amd64.zip`
-- SHA-256: `d95f90777813a0aebd9438f16149dfa958f64c855d53b24bfa8f96acc7ff00da`
-- GitHub upload is pending until the local GitHub network path and token authentication are restored.
+- Release name: `EsurfingGo v1.2.1 - Windows Native GUI`
+- The Windows GUI and tray icon are embedded from `assets/esurfing.ico`.
+- The CI workflow packages `EsurfingGo-v1.2.1-windows-amd64.zip` and `SHA256SUMS.txt`.
 
 ## Next Backlog
 

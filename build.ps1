@@ -31,7 +31,9 @@ foreach ($t in $Targets) {
     $env:GOARCH = $t.GOARCH
     if ($t.ContainsKey("GOARM"))  { $env:GOARM = $t.GOARM }   else { Remove-Item Env:\GOARM -ErrorAction SilentlyContinue }
     if ($t.ContainsKey("GOMIPS")) { $env:GOMIPS = $t.GOMIPS }  else { Remove-Item Env:\GOMIPS -ErrorAction SilentlyContinue }
-    go build -trimpath -ldflags="$LDFlags" -o $output .
+    $ldflags = $LDFlags
+    if ($t.GOOS -eq "windows") { $ldflags = "-H=windowsgui $LDFlags" }
+    go build -trimpath -ldflags="$ldflags" -o $output .
     if ($LASTEXITCODE -ne 0) { throw "Build failed for $label" }
 }
 

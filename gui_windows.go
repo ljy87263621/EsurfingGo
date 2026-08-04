@@ -58,7 +58,6 @@ const (
 	guiNIFTip               = 0x00000004
 	guiNIMAdd               = 0x00000000
 	guiNIMDelete            = 0x00000002
-	guiIDIApplication       = 32512
 	guiBMGetCheck           = 0x00F0
 	guiBMSetCheck           = 0x00F1
 	guiBSTChecked           = 1
@@ -67,11 +66,8 @@ const (
 	guiCBSetCurrent         = 0x014E
 	guiCBGetCurrent         = 0x0147
 	guiEMSetSel             = 0x00B1
-	guiWSChild              = 0x40000000
-	guiWSVisible            = 0x10000000
 	guiWSClipSiblings       = 0x04000000
 	guiWSClipChildren       = 0x02000000
-	guiWSTabStop            = 0x00010000
 	guiWSVScroll            = 0x00200000
 	guiCBSDropdownList      = 0x0003
 	guiEditExClientEdge     = 0x00000200
@@ -108,6 +104,7 @@ var (
 	procCreateFont            = gdi32.NewProc("CreateFontW")
 	procDeleteObject          = gdi32.NewProc("DeleteObject")
 	procLoadIcon              = user32.NewProc("LoadIconW")
+	procLoadImage             = user32.NewProc("LoadImageW")
 	procRegisterWindowMessage = user32.NewProc("RegisterWindowMessageW")
 	procCreatePopupMenu       = user32.NewProc("CreatePopupMenu")
 	procAppendMenu            = user32.NewProc("AppendMenuW")
@@ -278,14 +275,17 @@ func runGUI(autostartRequested bool) error {
 	taskbarCreated := registerGUIWindowMessage("TaskbarCreated")
 	className, _ := syscall.UTF16PtrFromString(guiClassName)
 	cursor, _, _ := procLoadCursor.Call(0, uintptr(32512))
+	icon := loadGUIAppIcon(instance)
 	wndProc := syscall.NewCallback(guiWndProc)
 	class := guiWndClassEx{
 		Size:       uint32(unsafe.Sizeof(guiWndClassEx{})),
 		WndProc:    wndProc,
 		Instance:   instance,
+		Icon:       icon,
 		Cursor:     cursor,
 		Background: 6,
 		ClassName:  className,
+		IconSm:     icon,
 	}
 	if result, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&class))); result == 0 && err != syscall.Errno(1410) {
 		return fmt.Errorf("register window class: %w", err)
@@ -1055,7 +1055,8 @@ func (w *guiWindow) ensureTrayIcon() {
 	}
 	hwnd := w.hwnd
 	w.mu.Unlock()
-	icon, _, _ := procLoadIcon.Call(0, guiIDIApplication)
+	instance, _, _ := procGetModuleHandle.Call(0)
+	icon := loadGUIAppIcon(instance)
 	var tip [128]uint16
 	copy(tip[:], syscall.StringToUTF16(guiWindowTitle))
 	data := guiNotifyIconData{
@@ -1073,6 +1074,30 @@ func (w *guiWindow) ensureTrayIcon() {
 		w.trayAdded = true
 		w.mu.Unlock()
 	}
+}
+
+func loadGUIAppIcon(instance uintptr) uintptr {
+	return loadImageIcon(instance, guiAppIconResourceID, 0, 0)
+}
+
+func loadImageIcon(instance, resourceID uintptr, width, height int32) uintptr {
+	const (
+		guiImageIcon     = 1
+		guiLRDefaultSize = 0x00000040
+		guiLRShared      = 0x00008000
+	)
+	icon, _, _ := procLoadImage.Call(
+		instance,
+		resourceID,
+		guiImageIcon,
+		uintptr(width),
+		uintptr(height),
+		guiLRDefaultSize|guiLRShared,
+	)
+	if icon == 0 {
+		icon, _, _ = procLoadIcon.Call(instance, resourceID)
+	}
+	return icon
 }
 
 func (w *guiWindow) removeTrayIcon() {

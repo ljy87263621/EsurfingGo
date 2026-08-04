@@ -83,8 +83,10 @@ jobs:
           GOMIPS: ${{ matrix.gomips }}
         run: |
           ext=""
+          ldflags="-s -w"
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-          go build -trimpath -ldflags="-s -w" -o "dist/esurfing-${{ matrix.label }}${ext}" .
+          if [ "$GOOS" = "windows" ]; then ldflags="-H=windowsgui -s -w"; fi
+          go build -trimpath -ldflags="$ldflags" -o "dist/esurfing-${{ matrix.label }}${ext}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -92,9 +94,42 @@ jobs:
           name: esurfing-${{ matrix.label }}
           path: dist/
 
-  release:
+  package-windows:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: esurfing-windows-amd64
+          path: package/esurfing-windows-amd64
+
+      - name: Package Windows Portable release
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          root="package/EsurfingGo-${version}-windows-amd64"
+          mkdir -p "$root/docs"
+          cp package/esurfing-windows-amd64/esurfing-windows-amd64.exe "$root/"
+          cp README.md LICENSE esurfing.example.json "$root/"
+          cp docs/windows-local.md "$root/docs/"
+          mkdir -p dist
+          (cd package && zip -qr "../dist/EsurfingGo-${version}-windows-amd64.zip" "EsurfingGo-${version}-windows-amd64")
+          (cd dist && sha256sum "EsurfingGo-${version}-windows-amd64.zip" > SHA256SUMS.txt)
+
+      - name: Upload Windows Portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esurfing-windows-amd64-portable
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, package-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -106,5 +141,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/esurfing-*
+          files: |
+            artifacts/esurfing-*
+            artifacts/EsurfingGo-*
+            artifacts/SHA256SUMS.txt
           generate_release_notes: true

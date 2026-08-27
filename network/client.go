@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	userAgent     = "CCTP/android64_vpn/2093"
+	userAgent     = "CCTP/WinSVR5/1068"
 	requestAccept = "text/html,text/xml,application/xhtml+xml,application/x-javascript,*/*"
 )
 

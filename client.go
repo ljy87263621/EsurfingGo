@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -215,7 +216,7 @@ func (c *Client) checkSMSVerify() string {
 func (c *Client) initSession() error {
 	log.Printf("[Client] Initializing session, TicketURL supplied (%s), AlgoID: %s", previewForLog(c.states.GetTicketURL()), c.states.GetAlgoID())
 	c.session.Free()
-	body, err := network.PostRaw(c.httpClient, c.states.GetTicketURL(), c.states.GetAlgoID(), c.states)
+	body, err := network.PostRaw(c.httpClient, ticketURLWithClientParams(c.states.GetTicketURL(), c.states.GetAcIP(), c.states.GetUserIP()), c.states.GetAlgoID(), c.states)
 	if err != nil {
 		return fmt.Errorf("request session ZSM: %w", err)
 	}
@@ -230,7 +231,7 @@ func (c *Client) initSession() error {
 func (c *Client) getTicket() (string, error) {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/android64_vpn/2093</user-agent>
+    <user-agent>CCTP/WinSVR5/1068</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>
@@ -255,7 +256,7 @@ func (c *Client) getTicket() (string, error) {
 		return "", fmt.Errorf("encrypt ticket payload: %w", err)
 	}
 	log.Printf("[Client] getTicket encrypted payload prepared (%s)", previewForLog(encrypted))
-	data, err := network.Post(c.httpClient, c.states.GetTicketURL(), encrypted, c.states, nil)
+	data, err := network.Post(c.httpClient, ticketURLWithClientParams(c.states.GetTicketURL(), c.states.GetAcIP(), c.states.GetUserIP()), encrypted, c.states, nil)
 	if err != nil {
 		return "", err
 	}
@@ -270,6 +271,25 @@ func (c *Client) getTicket() (string, error) {
 	return ticket, nil
 }
 
+func ticketURLWithClientParams(raw, acIP, userIP string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	q := u.Query()
+	if q.Get("wlanacip") == "" && acIP != "" {
+		q.Set("wlanacip", acIP)
+	}
+	if q.Get("wlanuserip") == "" && userIP != "" {
+		q.Set("wlanuserip", userIP)
+	}
+	if q.Get("clientip") == "" {
+		q.Set("clientip", "1")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func (c *Client) login(code string) error {
 	verify := ""
 	if strings.TrimSpace(code) != "" {
@@ -278,7 +298,7 @@ func (c *Client) login(code string) error {
 
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/android64_vpn/2093</user-agent>
+    <user-agent>CCTP/WinSVR5/1068</user-agent>
     <client-id>%s</client-id>
     <ticket>%s</ticket>
     <local-time>%s</local-time>
@@ -325,7 +345,7 @@ func (c *Client) login(code string) error {
 func (c *Client) heartbeat(ticket string) error {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/android64_vpn/2093</user-agent>
+    <user-agent>CCTP/WinSVR5/1068</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>
@@ -368,7 +388,7 @@ func (c *Client) heartbeat(ticket string) error {
 func (c *Client) Term() {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/android64_vpn/2093</user-agent>
+    <user-agent>CCTP/WinSVR5/1068</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>

@@ -52,12 +52,17 @@ try {
         } else {
             foreach ($port in $ports) { & $pktmon.Path filter add -p $port | Out-Null }
         }
-        & $pktmon.Path start --etw -p 0 -s 0 -f $etl | Out-Null
+        if (Test-Path -LiteralPath $etl) { Remove-Item -LiteralPath $etl -Force }
+        if (Test-Path -LiteralPath $pcap) { Remove-Item -LiteralPath $pcap -Force }
+        & $pktmon.Path start --etw -f $etl | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "pktmon failed to start (exit code $LASTEXITCODE). Run this script from an elevated PowerShell." }
         $captureStarted = $true
         Write-Host "pktmon capture started for PID $ProcessId. Reproduce the official-client login now."
         Start-Sleep -Seconds $DurationSeconds
         & $pktmon.Path stop | Out-Null
+        if (-not (Test-Path -LiteralPath $etl)) { throw "pktmon stopped without producing an ETL file; no packets were captured." }
         & $pktmon.Path pcapng $etl -o $pcap | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pcap)) { throw "pktmon could not convert the ETL capture to PCAPNG." }
         Save-Text "pktmon-filter.txt" { & $pktmon.Path filter list }
         Write-Host "Packet capture written to $pcap"
     } elseif (-not $NoNetshFallback -and $netsh) {

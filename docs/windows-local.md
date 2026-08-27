@@ -154,7 +154,7 @@ Windows ICS 常见的移动热点网关是 `192.168.137.1`，另一种常见共�
   -DurationSeconds 120
 ```
 
-运行后立即在官方客户端执行一次登录/重连，等待脚本结束。生成的 `official-client.pcapng`、`metadata.json`、`connections-*.txt` 和 `network-state.txt` 保存在指定目录。抓包可能包含账号、密码、票据和会话令牌，请只保存在本机；提交分析前必须脱敏。
+运行后立即在官方客户端执行一次登录/重连，等待脚本结束。脚本必须在“管理员 PowerShell”中运行；如果提示 `pktmon failed to start`，请提升 PowerShell 权限后重试。生成的 `official-client.pcapng`、`metadata.json`、`connections-*.txt` 和 `network-state.txt` 保存在指定目录。抓包可能包含账号、密码、票据和会话令牌，请只保存在本机；提交分析前必须脱敏。
 
 - GUI 是轻量原生窗口；命令行/后台模式仍可用于计划任务和脚本化启动。
 - 真实账号密码保存在本机 JSON 时是明文；建议只放在个人电脑目录中，并避免同步到网盘或 Git。

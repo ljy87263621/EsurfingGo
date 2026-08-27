@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type FileConfig struct {
@@ -156,4 +157,25 @@ func setupLogOutput(logFile string) (*os.File, error) {
 	}
 	log.SetOutput(io.MultiWriter(os.Stderr, file))
 	return file, nil
+}
+
+// setupPersistentLog creates one log file per process start. Files are named
+// YYYYMMDD-N.log, where N is the next launch number for that date.
+func setupPersistentLog() (*os.File, string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "."
+	}
+	date := time.Now().Format("20060102")
+	for n := 1; n < 10000; n++ {
+		path := filepath.Join(dir, fmt.Sprintf("%s-%d.log", date, n))
+		file, openErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if openErr == nil {
+			return file, path, nil
+		}
+		if !os.IsExist(openErr) {
+			return nil, "", fmt.Errorf("create persistent log %q: %w", path, openErr)
+		}
+	}
+	return nil, "", fmt.Errorf("too many log files for %s", date)
 }

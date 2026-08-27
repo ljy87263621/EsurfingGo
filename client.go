@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"esurfing/network"
 	"esurfing/utils"
 	"fmt"
@@ -135,14 +136,20 @@ func (c *Client) authorization() {
 		log.Println("[Client] SMS verification code provided.")
 	}
 
-	c.initSession()
-
-	if !c.session.IsInitialized() {
-		if c.retryCount >= 5 {
-			log.Println("Unable to find algorithm implementation, please restart the application or try version 1.8.0 or below.")
-			c.states.SetRunning(false)
+	if err := c.initSession(); err != nil {
+		var unsupportedErr *UnsupportedAlgorithmError
+		if errors.As(err, &unsupportedErr) {
+			c.retryCount++
+			if c.retryCount >= 5 {
+				log.Printf("[Client] Unsupported session algorithm %q. A protocol/client update may be required.", unsupportedErr.AlgoID)
+				c.states.SetRunning(false)
+			} else {
+				log.Printf("[Client] Unsupported session algorithm %q; retry %d/5.", unsupportedErr.AlgoID, c.retryCount)
+			}
+		} else {
+			c.retryCount = 0
+			log.Printf("[Client] Session initialization temporarily failed: %v; will retry.", err)
 		}
-		c.retryCount++
 		return
 	}
 
@@ -205,16 +212,19 @@ func (c *Client) checkSMSVerify() string {
 	return ""
 }
 
-func (c *Client) initSession() {
+func (c *Client) initSession() error {
 	log.Printf("[Client] Initializing session, TicketURL supplied (%s), AlgoID: %s", previewForLog(c.states.GetTicketURL()), c.states.GetAlgoID())
+	c.session.Free()
 	body, err := network.PostRaw(c.httpClient, c.states.GetTicketURL(), c.states.GetAlgoID(), c.states)
 	if err != nil {
-		log.Printf("[Client] Init session error: %v", err)
-		return
+		return fmt.Errorf("request session ZSM: %w", err)
 	}
 	log.Printf("[Client] Session ZSM response: %d bytes", len(body))
-	c.session.Initialize(body)
+	if err := c.session.Initialize(body); err != nil {
+		return fmt.Errorf("parse session ZSM: %w", err)
+	}
 	log.Printf("[Client] Session initialized: %v, AlgoID: %s", c.session.IsInitialized(), c.session.GetAlgoID())
+	return nil
 }
 
 func (c *Client) getTicket() (string, error) {

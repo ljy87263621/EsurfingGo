@@ -57,6 +57,24 @@ func guiConfiguredInterfaceSelection(network, interfaceCount int) int {
 	return network
 }
 
+func guiAutomaticTransportStatus(err error, transportAvailable bool) string {
+	if err != nil {
+		return "TUN兼容传输不可用，使用系统路由：" + err.Error()
+	}
+	if transportAvailable {
+		return "自动网卡路由：随TUN状态动态调整"
+	}
+	return "自动网卡路由不可用，使用系统路由"
+}
+
+func guiNetworkCompatibilityStatusText(status networkCompatibilityStatus) string {
+	return status.hotspotExclusionHint()
+}
+
+func guiNetworkStatusMessageMatches(closing bool, messageRun, currentRun, compatibilityRun uint64) bool {
+	return !closing && messageRun != 0 && messageRun == currentRun && messageRun == compatibilityRun
+}
+
 func guiEditStyle(password bool) uintptr {
 	style := guiWSBorder | guiESAutoHScroll
 	if password {

@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -117,5 +118,47 @@ func TestSafeURLForLogStripsQueryAndFragment(t *testing.T) {
 	want := "https://portal.example/auth"
 	if got != want {
 		t.Fatalf("safeURLForLog() = %q, want %q", got, want)
+	}
+}
+
+func TestPostRawEmptyResponseReturnsError(t *testing.T) {
+	state := &testState{
+		clientID: "cid-test",
+		algoID:   "00000000-0000-0000-0000-000000000000",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	_, err := PostRaw(NewHTTPClient(state), server.URL+"/ticket.cgi?token=secret", "payload", state)
+	if err == nil {
+		t.Fatal("PostRaw returned nil error for an empty response")
+	}
+
+	var emptyErr *EmptyResponseError
+	if !errors.As(err, &emptyErr) {
+		t.Fatalf("PostRaw error = %T %v, want EmptyResponseError", err, err)
+	}
+	if emptyErr.StatusCode != http.StatusOK {
+		t.Fatalf("empty response status = %d, want %d", emptyErr.StatusCode, http.StatusOK)
+	}
+	if strings.Contains(emptyErr.FinalURL, "token=secret") {
+		t.Fatalf("empty response error leaked URL query: %q", emptyErr.FinalURL)
+	}
+}
+
+func TestPostRawOmitsPlaceholderAlgoID(t *testing.T) {
+	state := &testState{clientID: "cid-test", algoID: "00000000-0000-0000-0000-000000000000"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Algo-ID"); got != "" {
+			t.Errorf("placeholder Algo-ID header = %q, want omitted", got)
+		}
+		_, _ = w.Write([]byte("zsm"))
+	}))
+	defer server.Close()
+	if _, err := PostRaw(NewHTTPClient(state), server.URL+"/ticket.cgi", "payload", state); err != nil {
+		t.Fatalf("PostRaw returned error: %v", err)
 	}
 }

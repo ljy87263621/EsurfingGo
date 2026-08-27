@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -89,6 +90,14 @@ func main() {
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	persistentLog, persistentPath, persistentErr := setupPersistentLog()
+	if persistentErr != nil {
+		fmt.Printf("Warning: unable to create persistent log: %v\n", persistentErr)
+	} else {
+		defer persistentLog.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, persistentLog))
+		log.Printf("[Main] Persistent log: %s", persistentPath)
+	}
 	logHandle, err := setupLogOutput(*logFile)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -96,12 +105,15 @@ func main() {
 	}
 	if logHandle != nil {
 		defer logHandle.Close()
+		if persistentLog != nil {
+			log.SetOutput(io.MultiWriter(os.Stderr, persistentLog, logHandle))
+		}
 	}
 	log.Printf("[Main] Starting ESurfing Go client")
 	log.Printf("[Main] User supplied (%s)", previewForLog(*user))
 
 	// Create bound transport if a specific interface is selected
-	var boundTransport *http.Transport
+	var boundTransport http.RoundTripper
 	if selectedIface != nil {
 		var err error
 		boundTransport, err = NewBoundHTTPTransport(selectedIface)
@@ -110,11 +122,12 @@ func main() {
 			os.Exit(1)
 		}
 		log.Printf("[Main] Using network interface: %s (#%d)", selectedIface.Name, selectedIface.Index)
-	} else if transport, interfaceName, err := NewTUNSafeHTTPTransport(); err != nil {
-		log.Printf("[Main] TUN-safe transport unavailable: %v; using system routing", err)
-	} else if transport != nil {
+	} else if transport, err := NewTUNAwareHTTPTransport(); err != nil {
+		log.Printf("[Main] TUN-aware transport unavailable: %v; using system routing", err)
+	} else {
 		boundTransport = transport
-		log.Printf("[Main] TUN detected; binding authentication traffic to physical interface: %s", interfaceName)
+		log.Printf("[Main] Automatic transport enabled; authentication traffic will follow TUN state and prefer a physical interface")
+		logNetworkCompatibility("[Main]")
 	}
 
 	states := NewStates()

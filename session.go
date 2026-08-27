@@ -7,6 +7,34 @@ import (
 	"sync"
 )
 
+// SessionResponseError indicates a malformed or incomplete ZSM response.
+type SessionResponseError struct {
+	Length int
+	Reason string
+}
+
+func (e *SessionResponseError) Error() string {
+	return fmt.Sprintf("invalid session ZSM response (%d bytes): %s", e.Length, e.Reason)
+}
+
+// UnsupportedAlgorithmError indicates that the server supplied an algorithm
+// identifier which this client does not implement.
+type UnsupportedAlgorithmError struct {
+	AlgoID string
+	Err    error
+}
+
+func (e *UnsupportedAlgorithmError) Error() string {
+	if e.Err == nil {
+		return fmt.Sprintf("unsupported session algorithm %q", e.AlgoID)
+	}
+	return fmt.Sprintf("unsupported session algorithm %q: %v", e.AlgoID, e.Err)
+}
+
+func (e *UnsupportedAlgorithmError) Unwrap() error {
+	return e.Err
+}
+
 // Session manages the encryption cipher for the current connection.
 type Session struct {
 	mu          sync.RWMutex
@@ -21,17 +49,24 @@ func NewSession() *Session {
 
 // Initialize parses the ZSM response bytes and initializes the cipher.
 // ZSM format: [4 header bytes, byte[3]=keyLen] [keyLen key bytes] [separator '$'] [36-char UUID] [']'] [binary data...]
-func (s *Session) Initialize(zsm []byte) {
+func (s *Session) Initialize(zsm []byte) error {
 	log.Println("Initializing Session...")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.initialized = s.load(zsm)
+	s.initialized = false
+	s.cipher = nil
+	s.algoID = ""
+	if err := s.load(zsm); err != nil {
+		return err
+	}
+	s.initialized = true
+	return nil
 }
 
-func (s *Session) load(zsm []byte) bool {
+func (s *Session) load(zsm []byte) error {
 	if len(zsm) < 4 {
 		log.Printf("[Session] ZSM too short: %d bytes", len(zsm))
-		return false
+		return &SessionResponseError{Length: len(zsm), Reason: "response is too short"}
 	}
 
 	hexLen := min(len(zsm), 200)
@@ -42,7 +77,7 @@ func (s *Session) load(zsm []byte) bool {
 	log.Printf("[Session] keyLen=%d (0x%02X)", keyLen, zsm[3])
 	if pos+keyLen >= len(zsm) {
 		log.Printf("[Session] keyLen exceeds ZSM length")
-		return false
+		return &SessionResponseError{Length: len(zsm), Reason: "key length exceeds response"}
 	}
 	pos += keyLen
 	pos++ // skip separator byte (e.g. '$')
@@ -51,7 +86,7 @@ func (s *Session) load(zsm []byte) bool {
 	const uuidLen = 36
 	if pos+uuidLen > len(zsm) {
 		log.Printf("[Session] not enough bytes for UUID at pos=%d", pos)
-		return false
+		return &SessionResponseError{Length: len(zsm), Reason: "response does not contain a complete algorithm identifier"}
 	}
 	algoID := string(zsm[pos : pos+uuidLen])
 	log.Printf("[Session] Parsed algoID: %q", algoID)
@@ -59,11 +94,11 @@ func (s *Session) load(zsm []byte) bool {
 	c, err := cipher.NewCipher(algoID)
 	if err != nil {
 		log.Printf("[Session] Error: %v", err)
-		return false
+		return &UnsupportedAlgorithmError{AlgoID: algoID, Err: err}
 	}
 	s.cipher = c
 	s.algoID = algoID
-	return true
+	return nil
 }
 
 func (s *Session) IsInitialized() bool {
@@ -101,4 +136,5 @@ func (s *Session) Free() {
 	defer s.mu.Unlock()
 	s.initialized = false
 	s.cipher = nil
+	s.algoID = ""
 }

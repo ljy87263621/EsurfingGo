@@ -117,10 +117,39 @@ func TestCaptivePortalTransportLeavesAuthenticationRequestsUntouched(t *testing.
 	}
 }
 
+func TestNewHTTPClientUsesBoundTransportForPortalResolver(t *testing.T) {
+	state := &testState{}
+	boundTransport := &recordingRoundTripper{}
+
+	client := NewHTTPClient(state, boundTransport)
+	redirect, ok := client.Transport.(*redirectInterceptor)
+	if !ok {
+		t.Fatalf("HTTP client transport = %T, want *redirectInterceptor", client.Transport)
+	}
+	captive, ok := redirect.inner.(*captivePortalTransport)
+	if !ok {
+		t.Fatalf("redirect transport inner = %T, want *captivePortalTransport", redirect.inner)
+	}
+	resolver, ok := captive.resolver.(*doHResolver)
+	if !ok {
+		t.Fatalf("portal resolver = %T, want *doHResolver", captive.resolver)
+	}
+
+	if resolver.client.Transport != boundTransport {
+		t.Fatalf("portal resolver transport = %T, want the supplied bound transport %T", resolver.client.Transport, boundTransport)
+	}
+}
+
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type recordingRoundTripper struct{}
+
+func (*recordingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, nil
 }
 
 type staticHostResolver struct {

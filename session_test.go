@@ -59,3 +59,22 @@ func TestSessionNotInitialized(t *testing.T) {
 		t.Error("New session should have empty algoID")
 	}
 }
+
+func TestSessionFailureClearsPreviousAlgorithm(t *testing.T) {
+	const algoID = "CAFBCBAD-B6E7-4CAB-8A67-14D39F00CE1E"
+	zsm := append([]byte{0, 0, 0, 0, '$'}, []byte(algoID)...)
+
+	sess := NewSession()
+	sess.Initialize(zsm)
+	if !sess.IsInitialized() {
+		t.Fatal("session should initialize from a supported ZSM response")
+	}
+
+	sess.Initialize(nil)
+	if sess.IsInitialized() {
+		t.Fatal("session should not remain initialized after an empty response")
+	}
+	if got := sess.GetAlgoID(); got != "" {
+		t.Fatalf("failed session retained algoID %q", got)
+	}
+}

@@ -29,6 +29,8 @@ const (
 	guiWMLog                = 0x0400 + 1
 	guiWMClientDone         = 0x0400 + 2
 	guiWMInterfacesDone     = 0x0400 + 3
+	guiWMNetworkStatus      = 0x0400 + 4
+	guiWMClientError        = 0x0400 + 5
 	guiWMNCCreate           = 0x0081
 	guiWMCreate             = 0x0001
 	guiWMClose              = 0x0010
@@ -240,6 +242,7 @@ type guiWindow struct {
 	closing            bool
 	destroyed          bool
 	runID              uint64
+	compatibilityRunID uint64
 	refreshID          uint64
 	registryToken      uintptr
 	trayIcon           uintptr
@@ -253,6 +256,7 @@ type guiWindow struct {
 
 type guiLogWriter struct {
 	window *guiWindow
+	file   *os.File
 }
 
 func (w *guiLogWriter) Write(p []byte) (int, error) {
@@ -262,6 +266,9 @@ func (w *guiLogWriter) Write(p []byte) (int, error) {
 	text := strings.TrimSpace(string(p))
 	if text == "" {
 		return len(p), nil
+	}
+	if w.file != nil {
+		_, _ = w.file.Write(p)
 	}
 	w.window.postGUIString(guiWMLog, text)
 	return len(p), nil
@@ -430,6 +437,11 @@ func guiWndProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 		if closing {
 			procDestroyWindow.Call(hwnd)
 		}
+	case guiWMClientError:
+		payload, ok := takeGUIString(lParam)
+		if ok && payload.owner == window.registryToken {
+			messageBox(window.hwnd, payload.text, guiWindowTitle)
+		}
 	case guiWMInterfacesDone:
 		payload, ok := takeGUIInterfaceResult(lParam)
 		if !ok || payload.owner != window.registryToken {
@@ -443,6 +455,20 @@ func guiWndProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uintptr {
 			return 0
 		}
 		window.applyInterfaceResult(payload.result)
+	case guiWMNetworkStatus:
+		payload, ok := takeGUIString(lParam)
+		if !ok || payload.owner != window.registryToken {
+			return 0
+		}
+		window.mu.Lock()
+		currentRun := window.runID
+		compatibilityRun := window.compatibilityRunID
+		closing := window.closing
+		window.mu.Unlock()
+		if !guiNetworkStatusMessageMatches(closing, uint64(wParam), currentRun, compatibilityRun) {
+			return 0
+		}
+		window.setStatus(payload.text)
 	case guiWMNCDestroy:
 		window.removeTrayIcon()
 		window.mu.Lock()
@@ -534,9 +560,16 @@ func (w *guiWindow) createControls() {
 	}
 	w.loadConfig()
 	w.refreshInterfaces()
-	w.logWriter = &guiLogWriter{window: w}
+	persistentLog, persistentPath, persistentErr := setupPersistentLog()
+	if persistentErr != nil {
+		messageBox(w.hwnd, "无法创建本地日志文件："+persistentErr.Error(), guiWindowTitle)
+	}
+	w.logWriter = &guiLogWriter{window: w, file: persistentLog}
 	log.SetOutput(w.logWriter)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	if persistentPath != "" {
+		log.Printf("[GUI] Persistent log: %s", persistentPath)
+	}
 	w.layoutControls()
 	w.ensureTrayIcon()
 }
@@ -701,11 +734,9 @@ func (w *guiWindow) startClient() {
 	states.RefreshStates()
 	var client *Client
 	if iface == nil {
-		transport, interfaceName, err := NewTUNSafeHTTPTransport()
-		if err != nil {
-			w.setStatus("TUN直连准备失败，使用系统路由：" + err.Error())
-		} else if transport != nil {
-			w.setStatus("TUN安全直连：" + interfaceName)
+		transport, err := NewTUNAwareHTTPTransport()
+		w.setStatus(guiAutomaticTransportStatus(err, transport != nil))
+		if err == nil && transport != nil {
 			client = NewClient(Options{LoginUser: user, LoginPassword: password, SMSCodeProvider: guiNoSMSCodeProvider{}}, states, session, transport)
 		} else {
 			client = NewClient(Options{LoginUser: user, LoginPassword: password, SMSCodeProvider: guiNoSMSCodeProvider{}}, states, session)
@@ -725,6 +756,11 @@ func (w *guiWindow) startClient() {
 	w.stopping = false
 	w.runID++
 	runID := w.runID
+	if iface == nil {
+		w.compatibilityRunID = runID
+	} else {
+		w.compatibilityRunID = 0
+	}
 	hwnd := w.hwnd
 	token := w.registryToken
 	w.mu.Unlock()
@@ -733,8 +769,15 @@ func (w *guiWindow) startClient() {
 		statusName = iface.Name
 	}
 	w.setStatus("运行中：" + statusName)
+	if iface == nil {
+		w.inspectNetworkCompatibilityForRun(runID)
+	}
 	go func() {
 		client.Run()
+		connected := states.IsLogged()
+		w.mu.Lock()
+		wasStopping := w.stopping
+		w.mu.Unlock()
 		if session.IsInitialized() && states.IsLogged() {
 			client.Term()
 			states.SetLogged(false)
@@ -746,9 +789,13 @@ func (w *guiWindow) startClient() {
 			w.states = nil
 			w.session = nil
 			w.stopping = false
+			w.compatibilityRunID = 0
 		}
 		w.mu.Unlock()
 		w.postGUIClientDone(hwnd, token, runID)
+		if !connected && !wasStopping {
+			postGUIString(hwnd, token, guiWMClientError, "连接失败，请查看日志获取详细信息。")
+		}
 	}()
 }
 
@@ -757,6 +804,7 @@ func (w *guiWindow) stopClient() {
 	client, states := w.client, w.states
 	if client != nil {
 		w.stopping = true
+		w.compatibilityRunID = 0
 	}
 	w.mu.Unlock()
 	if client == nil {
@@ -824,6 +872,30 @@ func (w *guiWindow) setStatus(text string) {
 	setGUIText(w.status, "状态："+text)
 }
 
+func (w *guiWindow) inspectNetworkCompatibilityForRun(runID uint64) {
+	go func() {
+		status, err := inspectNetworkCompatibility()
+		if err != nil {
+			log.Printf("[GUI] network compatibility inspection unavailable: %v", err)
+			return
+		}
+		if message := networkCompatibilityLogMessage("[GUI]", status); message != "" {
+			log.Print(message)
+		}
+		text := guiNetworkCompatibilityStatusText(status)
+		if text == "" {
+			return
+		}
+		w.mu.Lock()
+		hwnd, owner, destroyed := w.hwnd, w.registryToken, w.destroyed
+		w.mu.Unlock()
+		if destroyed || hwnd == 0 || owner == 0 {
+			return
+		}
+		postGUIStringWithWParam(hwnd, owner, guiWMNetworkStatus, uintptr(runID), text)
+	}()
+}
+
 func (w *guiWindow) appendLog(text string) {
 	if w.log == 0 {
 		return
@@ -850,6 +922,10 @@ func (w *guiWindow) postGUIString(message uint32, text string) {
 }
 
 func postGUIString(hwnd, owner uintptr, message uint32, text string) {
+	postGUIStringWithWParam(hwnd, owner, message, 0, text)
+}
+
+func postGUIStringWithWParam(hwnd, owner uintptr, message uint32, wParam uintptr, text string) {
 	if hwnd == 0 || owner == 0 {
 		return
 	}
@@ -861,7 +937,7 @@ func postGUIString(hwnd, owner uintptr, message uint32, text string) {
 	id := guiNextStringID
 	guiStrings[id] = guiStringPayload{owner: owner, text: text}
 	guiStringMu.Unlock()
-	if result, _, _ := procPostMessage.Call(hwnd, uintptr(message), 0, id); result == 0 {
+	if result, _, _ := procPostMessage.Call(hwnd, uintptr(message), wParam, id); result == 0 {
 		guiStringMu.Lock()
 		delete(guiStrings, id)
 		guiStringMu.Unlock()

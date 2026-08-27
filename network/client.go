@@ -19,6 +19,17 @@ const (
 	requestAccept = "text/html,text/xml,application/xhtml+xml,application/x-javascript,*/*"
 )
 
+// EmptyResponseError indicates that the server completed the HTTP request but
+// returned no protocol payload. The URL is sanitized before it is stored.
+type EmptyResponseError struct {
+	StatusCode int
+	FinalURL   string
+}
+
+func (e *EmptyResponseError) Error() string {
+	return fmt.Sprintf("empty response body (status=%d, finalURL=%s)", e.StatusCode, e.FinalURL)
+}
+
 // StateProvider provides the global state values needed for requests.
 type StateProvider interface {
 	GetClientID() string
@@ -159,7 +170,7 @@ func NewHTTPClient(state StateProvider, baseTransport ...http.RoundTripper) *htt
 	}
 	inner = &captivePortalTransport{
 		base:     inner,
-		resolver: newDefaultDoHResolver(),
+		resolver: newDefaultDoHResolver(baseTransport...),
 	}
 	transport := &redirectInterceptor{
 		inner:    inner,
@@ -196,7 +207,12 @@ func Post(client *http.Client, url, data string, state StateProvider, extraHeade
 	hash := md5.Sum([]byte(data))
 	req.Header.Set("CDC-Checksum", hex.EncodeToString(hash[:]))
 	req.Header.Set("Client-ID", state.GetClientID())
-	req.Header.Set("Algo-ID", state.GetAlgoID())
+	// The initial ticket.cgi negotiation uses an all-zero algorithm ID. Newer
+	// portals reject that placeholder when it is sent as a header; omit it
+	// until the server returns the negotiated algorithm.
+	if algoID := strings.TrimSpace(state.GetAlgoID()); algoID != "" && !isZeroAlgoID(algoID) {
+		req.Header.Set("Algo-ID", algoID)
+	}
 
 	if v := state.GetSchoolID(); v != "" {
 		req.Header.Set("CDC-SchoolId", v)
@@ -225,11 +241,12 @@ func Post(client *http.Client, url, data string, state StateProvider, extraHeade
 		return "", fmt.Errorf("read body: %w", err)
 	}
 	if len(body) == 0 {
-		finalURL := ""
+		finalURL := safeURLForLog(url)
 		if resp.Request != nil && resp.Request.URL != nil {
-			finalURL = resp.Request.URL.String()
+			finalURL = safeURLForLog(resp.Request.URL.String())
 		}
 		log.Printf("[Post] Empty response body from %s (status=%d, finalURL=%s)", safeURLForLog(url), resp.StatusCode, safeURLForLog(finalURL))
+		return "", &EmptyResponseError{StatusCode: resp.StatusCode, FinalURL: finalURL}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -254,7 +271,9 @@ func PostRaw(client *http.Client, url, data string, state StateProvider) ([]byte
 	hash := md5.Sum([]byte(data))
 	req.Header.Set("CDC-Checksum", hex.EncodeToString(hash[:]))
 	req.Header.Set("Client-ID", state.GetClientID())
-	req.Header.Set("Algo-ID", state.GetAlgoID())
+	if algoID := strings.TrimSpace(state.GetAlgoID()); algoID != "" && !isZeroAlgoID(algoID) {
+		req.Header.Set("Algo-ID", algoID)
+	}
 
 	if v := state.GetSchoolID(); v != "" {
 		req.Header.Set("CDC-SchoolId", v)
@@ -283,11 +302,12 @@ func PostRaw(client *http.Client, url, data string, state StateProvider) ([]byte
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if len(body) == 0 {
-		finalURL := ""
+		finalURL := safeURLForLog(url)
 		if resp.Request != nil && resp.Request.URL != nil {
-			finalURL = resp.Request.URL.String()
+			finalURL = safeURLForLog(resp.Request.URL.String())
 		}
 		log.Printf("[PostRaw] Empty response body from %s (status=%d, finalURL=%s)", safeURLForLog(url), resp.StatusCode, safeURLForLog(finalURL))
+		return nil, &EmptyResponseError{StatusCode: resp.StatusCode, FinalURL: finalURL}
 	}
 
 	return body, nil
@@ -301,4 +321,8 @@ func safeURLForLog(rawURL string) string {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()
+}
+
+func isZeroAlgoID(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "00000000-0000-0000-0000-000000000000")
 }

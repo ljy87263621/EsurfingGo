@@ -129,7 +129,15 @@ Unregister-ScheduledTask -TaskName EsurfingGo -Confirm:$false
 
 - 对比 `before` 与 `recovered` 中的 `route.txt`、`ip-interface.txt`、`dns-client.txt` 和 `proxy.txt`。如果默认路由、物理网卡状态或 DNS 没有恢复，不要继续认证测试，手动在系统网络设置中恢复网卡后再处理日志。
 
-本程序的修复目标是只约束自身的 HTTP/TCP/DNS socket 到活动物理 IPv4 网卡，不修改 Clash 配置、系统代理、默认路由或系统 DNS。因此联合测试必须分别记录“系统是否断网”和“本程序认证流量是否成功”，不能只看其中一个结果。
+本程序的修复目标是只约束自身的 HTTP/TCP/DNS socket 到活动物理 IPv4 网卡，不修改 Clash 配置、系统代理、默认路由或系统 DNS。自动选择模式使用物理 IPv4 源地址绑定，不设置 Windows `IP_UNICAST_IF`；手工选择具体网卡时仍使用强制接口绑定。TUN 持续开启时，程序会在认证请求前检查物理候选网卡、IPv4 地址和 Windows 默认路由优先级；若发现上行切换或地址变化，会关闭旧空闲连接并重建认证绑定。因此联合测试必须分别记录“系统是否断网”和“本程序认证流量是否成功”，不能只看其中一个结果。
+
+这项重建只覆盖 EsurfingGo 自身的认证连接，不覆盖 Clash TUN 的系统路由、热点客户端路由或 Windows ICS 转发；后者仍需要在 Clash/Mihomo 配置和 Windows 网络环境中单独处理。
+
+### 移动热点与 TUN 的能力边界
+
+Windows ICS 常见的移动热点网关是 `192.168.137.1`，另一种常见共享配置是 `192.168.5.1`。程序会只读识别这些网关及其接口 CIDR，并在自动传输启用时记录检测到的热点子网。这些 CIDR 仅用于诊断，不代表加入 `route-exclude-address` 后就能修复热点客户端公网转发；程序不会替用户修改 Clash/Mihomo、路由表、DNS 或 ICS。
+
+如果联合运行时出现断网，先分别判断本机和热点客户端是哪一侧失效：本程序只负责自身认证 socket 的物理网卡隔离，不负责热点客户端公网转发。Windows Mihomo TUN 的整机路由、Windows ICS 共享和热点客户端流量需要单独的转发方案；仅排除热点 CIDR 不能把目的为公网的热点流量自动改走物理网卡。不要在断网现场继续反复修改认证协议，应先保存 `tun-on`、`after-login` 和恢复后的网络状态，再根据 Clash/Mihomo 与 ICS 的日志定位转发链路。
 
 ## 当前边界
 

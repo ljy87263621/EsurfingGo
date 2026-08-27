@@ -11,10 +11,16 @@ func TestIsLikelyVirtualInterfaceName(t *testing.T) {
 			t.Fatalf("isLikelyVirtualInterfaceName(%q) = false, want true", name)
 		}
 	}
+	if !isLikelyHotspotInterfaceName("移动热点") {
+		t.Fatal("localized mobile hotspot adapter should be recognized")
+	}
 	for _, name := range []string{"以太网", "WLAN", "Intel(R) Wi-Fi 6E AX211 160MHz"} {
 		if isLikelyVirtualInterfaceName(name) {
 			t.Fatalf("isLikelyVirtualInterfaceName(%q) = true, want false", name)
 		}
+	}
+	if isLikelyHotspotInterfaceName("以太网") {
+		t.Fatal("physical Ethernet adapter should not be recognized as a hotspot")
 	}
 }
 

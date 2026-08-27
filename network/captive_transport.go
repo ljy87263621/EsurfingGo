@@ -105,7 +105,17 @@ func (r *doHResolver) Lookup(ctx context.Context, host string) ([]net.IP, error)
 	return ips, nil
 }
 
-func newDefaultDoHResolver() *doHResolver {
+func newDefaultDoHResolver(baseTransport ...http.RoundTripper) *doHResolver {
+	if len(baseTransport) > 0 && baseTransport[0] != nil {
+		return newDoHResolver(&http.Client{
+			// A bound authentication transport must also carry the DoH lookup.
+			// Otherwise portal detection can resolve through Clash while the
+			// subsequent authentication requests use the physical adapter.
+			Transport: baseTransport[0],
+			Timeout:   6 * time.Second,
+		}, defaultDoHEndpoint)
+	}
+
 	proxyURL, err := systemProxyURL()
 	if err != nil {
 		// The environment proxy remains a useful fallback when the Windows

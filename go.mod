@@ -5,4 +5,5 @@ go 1.25.5
 require (
 	github.com/emmansun/gmsm v0.41.1
 	github.com/google/uuid v1.6.0
+	golang.org/x/sys v0.46.0
 )

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestGUIConfigPathUsesExecutableDirectory(t *testing.T) {
 	got := guiConfigPath(`C:\Tools\EsurfingGo\esurfing.exe`)
@@ -64,6 +68,55 @@ func TestGUIInterfaceSelectionAllowsAutomaticRouting(t *testing.T) {
 
 	if _, ok = guiInterfaceSelection(2, interfaces); ok {
 		t.Fatal("out-of-range selection should be rejected")
+	}
+}
+
+func TestGUIAutomaticTransportStatusDistinguishesFallbackAndDynamicRouting(t *testing.T) {
+	if got := guiAutomaticTransportStatus(errors.New("builder failed"), false); got != "TUN兼容传输不可用，使用系统路由：builder failed" {
+		t.Fatalf("construction failure status = %q", got)
+	}
+	if got := guiAutomaticTransportStatus(nil, true); got != "自动网卡路由：随TUN状态动态调整" {
+		t.Fatalf("dynamic transport status = %q", got)
+	}
+	if got := guiAutomaticTransportStatus(nil, false); got != "自动网卡路由不可用，使用系统路由" {
+		t.Fatalf("empty transport status = %q", got)
+	}
+}
+
+func TestGUINetworkCompatibilityStatusUsesJointTUNAndHotspotBoundaryHint(t *testing.T) {
+	status := networkCompatibilityStatus{
+		tunActive:     true,
+		hotspotActive: true,
+		hotspotCIDRs:  []string{"192.168.137.0/24"},
+	}
+	got := guiNetworkCompatibilityStatusText(status)
+	for _, want := range []string{
+		"仅本程序认证流量已隔离",
+		"热点客户端转发仍由 Clash/Windows ICS 负责",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("GUI network compatibility status %q does not contain %q", got, want)
+		}
+	}
+
+	status.tunActive = false
+	if got := guiNetworkCompatibilityStatusText(status); got != "" {
+		t.Fatalf("GUI status without joint mode = %q, want empty", got)
+	}
+}
+
+func TestGUINetworkStatusMessageRejectsStaleOrInvalidatedRun(t *testing.T) {
+	if !guiNetworkStatusMessageMatches(false, 7, 7, 7) {
+		t.Fatal("current compatibility status should be accepted")
+	}
+	if guiNetworkStatusMessageMatches(false, 6, 7, 7) {
+		t.Fatal("stale compatibility status should be rejected")
+	}
+	if guiNetworkStatusMessageMatches(false, 7, 7, 0) {
+		t.Fatal("invalidated compatibility status should be rejected")
+	}
+	if guiNetworkStatusMessageMatches(true, 7, 7, 7) {
+		t.Fatal("compatibility status for a closing window should be rejected")
 	}
 }
 

@@ -141,6 +141,21 @@ Windows ICS 常见的移动热点网关是 `192.168.137.1`，另一种常见共�
 
 ## 当前边界
 
+### 官方客户端抓包
+
+可使用仓库中的 `scripts/capture-process-packets.ps1` 采集官方客户端登录期间的网络数据。脚本优先使用 Windows 自带 `pktmon`，按目标进程当前端口过滤，并同时保存进程信息、连接列表和网络状态；如果系统没有 `pktmon`，可回退到 `netsh trace`。
+
+请以管理员 PowerShell 执行：
+
+```powershell
+.\scripts\capture-process-packets.ps1 `
+  -ProcessId 23440 `
+  -OutputDirectory .\packet-capture-official `
+  -DurationSeconds 120
+```
+
+运行后立即在官方客户端执行一次登录/重连，等待脚本结束。生成的 `official-client.pcapng`、`metadata.json`、`connections-*.txt` 和 `network-state.txt` 保存在指定目录。抓包可能包含账号、密码、票据和会话令牌，请只保存在本机；提交分析前必须脱敏。
+
 - GUI 是轻量原生窗口；命令行/后台模式仍可用于计划任务和脚本化启动。
 - 真实账号密码保存在本机 JSON 时是明文；建议只放在个人电脑目录中，并避免同步到网盘或 Git。
 - 如果校园网门户页面格式与项目支持的 ESurfing 协议不同，需要保留脱敏日志再做适配。

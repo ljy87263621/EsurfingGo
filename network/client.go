@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	userAgent     = "CCTP/WinSVR5/1068"
+	// Use the maintained Linux desktop channel. The native Windows channel
+	// currently negotiates an unsupported AutoZSM algorithm on this portal.
+	userAgent     = "CCTP/Linux64/1003"
 	requestAccept = "text/html,text/xml,application/xhtml+xml,application/x-javascript,*/*"
 )
 

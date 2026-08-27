@@ -231,7 +231,7 @@ func (c *Client) initSession() error {
 func (c *Client) getTicket() (string, error) {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/WinSVR5/1068</user-agent>
+    <user-agent>CCTP/Linux64/1003</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>
@@ -298,7 +298,7 @@ func (c *Client) login(code string) error {
 
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/WinSVR5/1068</user-agent>
+    <user-agent>CCTP/Linux64/1003</user-agent>
     <client-id>%s</client-id>
     <ticket>%s</ticket>
     <local-time>%s</local-time>
@@ -345,7 +345,7 @@ func (c *Client) login(code string) error {
 func (c *Client) heartbeat(ticket string) error {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/WinSVR5/1068</user-agent>
+    <user-agent>CCTP/Linux64/1003</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>
@@ -388,7 +388,7 @@ func (c *Client) heartbeat(ticket string) error {
 func (c *Client) Term() {
 	payload := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <request>
-    <user-agent>CCTP/WinSVR5/1068</user-agent>
+    <user-agent>CCTP/Linux64/1003</user-agent>
     <client-id>%s</client-id>
     <local-time>%s</local-time>
     <host-name>%s</host-name>

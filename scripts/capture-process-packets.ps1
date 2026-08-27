@@ -54,7 +54,7 @@ try {
         }
         if (Test-Path -LiteralPath $etl) { Remove-Item -LiteralPath $etl -Force }
         if (Test-Path -LiteralPath $pcap) { Remove-Item -LiteralPath $pcap -Force }
-        & $pktmon.Path start --etw -f $etl | Out-Null
+        & $pktmon.Path start --capture --pkt-size 0 --file-name $etl | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "pktmon failed to start (exit code $LASTEXITCODE). Run this script from an elevated PowerShell." }
         $captureStarted = $true
         Write-Host "pktmon capture started for PID $ProcessId. Reproduce the official-client login now."
